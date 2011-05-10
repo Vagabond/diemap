@@ -1,0 +1,13 @@
+%% -*- mode: erlang; -*-
+
+{application, diemap,
+ [
+  {description, "A modular IMAP server written in erlang"},
+  {vsn, "0.1"},
+  {modules,
+   [
+   ]
+  },
+  {applications, [kernel, stdlib, cowboy, iconv]}
+ ]
+}.

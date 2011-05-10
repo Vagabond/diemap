@@ -1,0 +1,203 @@
+
+command <- tag space (command_any / command_nonauth / command_auth / command_select) CRLF`
+[Tag, _, Command, _] = Node,
+{Tag, Command}`;
+
+command_any <- ("CAPABILITY" / "LOGOUT" / "NOOP")`
+case Node of
+	<<"CAPABILITY">> -> capability;
+	<<"LOGOUT">> -> logout;
+	<<"NOOP">> -> noop
+end`;
+
+command_nonauth <- (login / authenticate / starttls);
+
+login <- "LOGIN" space username space password`
+[_, _, UserName, _, Password] = Node,
+{login, UserName, Password}`;
+
+username <- astring;
+
+password <- astring;
+
+authenticate <- "AUTHENTICATE" space auth_type`
+[_, _, AuthType] = Node,
+{authenticate, AuthType}`;
+
+auth_type <- atom;
+
+starttls <- "STARTTLS"`
+starttls`;
+
+command_auth <- (append / create / delete / examine / list / lsub / rename / select / status / subscribe / unsubscribe);
+
+append <- "APPEND" space mailbox (space flag_list)* (space date_time) space literal;
+
+create <- "CREATE" space mailbox;
+
+delete <- "DELETE" space mailbox;
+
+examine <- "EXAMINE" space mailbox;
+
+list <- "LIST" space mailbox space list_mailbox;
+
+lsub <- "LSUB" space mailbox space list_mailbox;
+
+rename <- "RENAME" space mailbox space mailbox;
+
+select <- "SELECT" space mailbox;
+
+status <- "STATUS" space mailbox space "(" status_att (space status_att)* ")";
+
+subscribe <- "SUBSCRIBE" space mailbox;
+
+unsubscribe <- "UNSUBSCRIBE" space mailbox;
+
+tag <- (!"+" astring_char)+`
+list_to_binary(lists:flatten(Node))`;
+
+status_att <- ("MESSAGES" / "RECENT" / "UIDNEXT" / "UIDVALIDITY" / "UNSEEN");
+
+list_mailbox <- (list_char / string);
+
+list_char <- (atom_char / list_wildcards / resp_specials);
+
+literal <- "{" number "}";
+
+date_time <- '"' date_day_fixed "-" date_month "-" date_year space time space zone '"';
+
+date_day_fixed <- (" " [0-9] / [1-3] [0-9]);
+
+date_month <- ("Jan" / "Feb" / "Mar" / "Apr" / "May" / "Jun" / "Jul" / "Aug" / "Sep" / "Oct" / "Nov" / "Dec");
+
+date_year <- [0-9] [0-9] [0-9] [0-9];
+
+time <- [0-9] [0-9] ":" [0-9] [0-9] ":" [0-9] [0-9];
+
+zone <- ("+" / "-") [0-9] [0-9] [0-9] [0-9];
+
+command_select <- ("CHECK" / "CLOSE" / "EXPUNGE" / copy / fetch / store / uid / search);
+
+copy <- "COPY" space sequence_set space mailbox;
+
+fetch <- "FETCH" space sequence_set space ("ALL" / "FULL" / "FAST" / fetch_att_list / fetch_att)`
+[_, _, Sequence, _, Att] = Node,
+{fetch, Sequence, Att}`;
+
+fetch_att_list <- "(" fetch_att (space fetch_att)* ")"`
+[_, Element, Elements, _] = Node,
+[Element] ++ lists:map(fun([_, E]) -> E end, Elements)`;
+
+fetch_att <- ("ENVELOPE" / "FLAGS" / "INTERNALDATE" / "RFC822" (".HEADER" / ".SIZE" / ".TEXT")? / "UID" / body_section:("BODY" section ("<" number "." nz_number ">")?) / body_section:("BODY.PEEK" section ("<" number "." nz_number ">")?) / body_structure:("BODY" ".STRUCTURE"?))`
+case Node of
+	{body_section, [B, Sections, []]} ->
+		[B, Sections];
+	{body_section, [B, Sections, [_, Start, _, End, _]]} ->
+		[B, Sections, {Start, End}];
+	{body_structure, L} ->
+		list_to_binary(L);
+	Node -> Node
+end`;
+
+store <- "STORE" space sequence_set space store_att_flags;
+
+store_att_flags <- ("+" / "-")? "FLAGS" ".SILENT"? space flag_list / (flag (space flag)*);
+
+flag <- ('\Answered' / '\Flagged' / '\Deleted' / '\Seen' / '\Draft');
+
+flag_list <- "(" (flag (space flag)*)? ")";
+
+uid <- "UID" space (copy / fetch / search / store);
+
+search <- "SEARCH" (space "CHARSET" space astring) (space search_key)+;
+
+search_key <- "ALL";
+
+section <- "[" section_spec? "]"`
+lists:nth(2, Node)`;
+
+section_spec <- (section_msgtext / section_part_text:(section_part "." section_text) / section_part)`
+case Node of
+	{section_part_text, [Part, _, Text]} ->
+		Part ++ [Text];
+	_ -> Node
+end`;
+
+section_msgtext <- (header_fields:("HEADER.FIELDS" ".NOT"? space header_list) / "HEADER" / "TEXT")`
+case Node of
+	{header_fields, [X, Y, _, List]} ->
+		[list_to_binary([X, Y]), List];
+	_ -> [Node]
+end`;
+
+section_part <- nz_number ("." nz_number)*`
+[Number, Numbers] = Node,
+[Number] ++ lists:map(fun([_, N]) -> N end, Numbers)`;
+
+section_text <- (section_msgtext / "MIME");
+
+header_list <- "(" header_fld_name (space header_fld_name)* ")"`
+[<<"(">>,Element,Elements,<<")">>] = Node,
+[Element] ++ lists:map(fun([_, E]) -> E end, Elements)`;
+
+header_fld_name <- astring;
+
+sequence_set <- (seq_range / seq_number) ("," sequence_set)*`
+[Sequence, Sequences] = Node,
+lists:flatten([Sequence] ++ lists:map(fun([_, E]) -> E end, Sequences))`;
+
+seq_number <- (nz_number / last:"*")`
+case Node of
+	{last, _} -> '*';
+	_ -> Node
+end`;
+
+seq_range <- seq_number ":" seq_number`
+[X, _, Y] = Node,
+{X, Y}`;
+
+space <- " ";
+
+CRLF <- "\r\n";
+
+mailbox <- (inbox / astring);
+
+inbox <- ("I" / "i") ("N" / "n") ("B" / "b") ("O" / "o") ("X" / "x");
+
+astring <- (astring:astring_char+ / string)`
+case Node of
+	{astring, Iolist} ->
+		list_to_binary(lists:flatten(Iolist));
+	_ ->
+		Node
+end`;
+		
+
+astring_char <- (atom_char / resp_specials);
+
+%nstring <- (nil / string);
+
+%nil <- "NIL";
+
+number <- [0-9]+`
+list_to_integer(binary_to_list(iolist_to_binary(Node)))`;
+
+nz_number <- [1-9]+ [0-9]*`
+list_to_integer(binary_to_list(iolist_to_binary(Node)))`;
+
+string <- '"' chars:(!'"' ("\\\\" / '\\"' / .))* '"' `iolist_to_binary(proplists:get_value(chars, Node))`;
+
+atom <- atom_char+`
+list_to_binary(Node)`;
+
+atom_char <- (!atom_specials .);
+
+atom_specials <- ("(" / ")" / "{" / " " / ctl / list_wildcards / quoted_specials / resp_specials);
+
+list_wildcards <- ("%" / "*");
+
+quoted_specials <- ("\\\\" /  '\\"');
+
+resp_specials <- "]";
+
+ctl <- ("\000" / "\001" / "\002" / "\003" / "\004" / "\005" / "\006" / "\007" / "\b" / "\t" / "\n" / "\v" / "\f" / "\r" / "\016" / "\017" / "\020" / "\021" / "\022" / "\023" / "\024" / "\025" / "\026" / "\027" / "\030" / "\031" / "\032" / "\033" / "\034" / "\035" / "\036" / "\037" / "\177");
