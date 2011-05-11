@@ -13,7 +13,7 @@ init(Peername, Options) ->
 
 handle_CAPABILITY(Capabilities, State) ->
 	%% Add or remove from the capabilities list here
-	{ok, Capabilities ++ ["IDLE"], State}.
+	{ok, Capabilities, State}.
 
 handle_NOOP(State) ->
 	{ok, State}.
