@@ -1,5 +1,5 @@
 
-command <- tag SP (command_any / command_nonauth / command_auth / command_select) CRLF`
+command <- tag SP (command_any / command_nonauth / command_auth / command_select / command_invalid) CRLF`
 [Tag, _, Command, _] = Node,
 {Tag, Command}`;
 
@@ -170,6 +170,9 @@ case Node of
 	[_, [], Keys] ->
 		{search, <<"us-ascii">>, despace(Keys)}
 end`;
+
+command_invalid <- [^\r\n]+`
+{invalid, list_to_binary(Node)}`;
 
 %% TODO this is vastly incomplete for now
 search_key <- "ALL";

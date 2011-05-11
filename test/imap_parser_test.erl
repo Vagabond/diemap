@@ -103,3 +103,10 @@ uid_test() ->
 	?assertEqual({<<"Tag">>, {uid, {fetch, [15, 16], <<"BODY">>}}}, imap_parser:parse("Tag UID FETCH 15,16 BODY\r\n")),
 	?assertEqual({<<"Tag">>, {uid, {search, <<"us-ascii">>, [<<"ALL">>]}}}, imap_parser:parse("Tag UID SEARCH ALL\r\n")),
 	?assertEqual({<<"Tag">>, {uid, {store, [1, 2, 3, {9, '*'}], {<<"+FLAGS.SILENT">>, [<<"\\Seen">>, <<"\\Draft">>]}}}}, imap_parser:parse("Tag UID STORE 1,2,3,9:* +FLAGS.SILENT (\\Seen \\Draft)\r\n")).
+
+invalid_command_test() ->
+	?assertEqual({<<"Tag">>, {invalid, <<"gobbledohoomasdasd">>}}, imap_parser:parse("Tag gobbledohoomasdasd\r\n")),
+	?assertEqual({<<"Tag">>, {invalid, <<"XAUTH">>}}, imap_parser:parse("Tag XAUTH\r\n")),
+	?assertEqual({<<"Tag">>, {invalid, <<"SEARCH">>}}, imap_parser:parse("Tag SEARCH\r\n")),
+	?assertEqual({<<"Tag">>, {invalid, <<"EHLO google.com">>}}, imap_parser:parse("Tag EHLO google.com\r\n")),
+	?assertMatch({fail, _}, imap_parser:parse("wtf\r\n")).
