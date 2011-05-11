@@ -1,5 +1,5 @@
 
-command <- tag space (command_any / command_nonauth / command_auth / command_select) CRLF`
+command <- tag SP (command_any / command_nonauth / command_auth / command_select) CRLF`
 [Tag, _, Command, _] = Node,
 {Tag, Command}`;
 
@@ -12,7 +12,7 @@ end`;
 
 command_nonauth <- (login / authenticate / starttls);
 
-login <- "LOGIN" space username space password`
+login <- "LOGIN" SP username SP password`
 [_, _, UserName, _, Password] = Node,
 {login, UserName, Password}`;
 
@@ -20,7 +20,7 @@ username <- astring;
 
 password <- astring;
 
-authenticate <- "AUTHENTICATE" space auth_type`
+authenticate <- "AUTHENTICATE" SP auth_type`
 [_, _, AuthType] = Node,
 {authenticate, AuthType}`;
 
@@ -31,40 +31,71 @@ starttls`;
 
 command_auth <- (append / create / delete / examine / list / lsub / rename / select / status / subscribe / unsubscribe);
 
-append <- "APPEND" space mailbox (space flag_list)* (space date_time) space literal;
+append <- "APPEND" SP mailbox (SP flag_list)? (SP date_time)? SP literal`
+[_, _, Mailbox, Flags, Date, _, Size] = Node,
+{append, Mailbox, despace_once(Flags), despace_once(Date), Size}`;
 
-create <- "CREATE" space mailbox;
+create <- "CREATE" SP mailbox`
+[_, _, Mailbox] = Node,
+{create, Mailbox}`;
 
-delete <- "DELETE" space mailbox;
+delete <- "DELETE" SP mailbox`
+[_, _, Mailbox] = Node,
+{delete, Mailbox}`;
 
-examine <- "EXAMINE" space mailbox;
+examine <- "EXAMINE" SP mailbox`
+[_, _, Mailbox] = Node,
+{examine, Mailbox}`;
 
-list <- "LIST" space mailbox space list_mailbox;
+list <- "LIST" SP mailbox SP list_mailbox`
+[_, _, Reference, _, Mailbox] = Node,
+{list, Reference, Mailbox}`;
 
-lsub <- "LSUB" space mailbox space list_mailbox;
+lsub <- "LSUB" SP mailbox SP list_mailbox`
+[_, _, Reference, _, Mailbox] = Node,
+{lsub, Reference, Mailbox}`;
 
-rename <- "RENAME" space mailbox space mailbox;
+rename <- "RENAME" SP mailbox SP mailbox`
+[_, _, OldMailbox, _, NewMailbox] = Node,
+{rename, OldMailbox, NewMailbox}`;
 
-select <- "SELECT" space mailbox;
+select <- "SELECT" SP mailbox`
+[_, _, Mailbox] = Node,
+{select, Mailbox}`;
 
-status <- "STATUS" space mailbox space "(" status_att (space status_att)* ")";
+status <- "STATUS" SP mailbox SP "(" status_att (SP status_att)* ")"`
+[_, _, Mailbox, _, _, Status, Statuses, _] = Node,
+{status, Mailbox, [Status] ++ despace(Statuses)}`;
 
-subscribe <- "SUBSCRIBE" space mailbox;
+subscribe <- "SUBSCRIBE" SP mailbox`
+[_, _, Mailbox] = Node,
+{subscribe, Mailbox}`;
 
-unsubscribe <- "UNSUBSCRIBE" space mailbox;
+unsubscribe <- "UNSUBSCRIBE" SP mailbox`
+[_, _, Mailbox] = Node,
+{unsubscribe, Mailbox}`;
 
 tag <- (!"+" astring_char)+`
 list_to_binary(lists:flatten(Node))`;
 
 status_att <- ("MESSAGES" / "RECENT" / "UIDNEXT" / "UIDVALIDITY" / "UNSEEN");
 
-list_mailbox <- (list_char / string);
+list_mailbox <- (string / chars:list_char+)`
+case Node of
+	{chars, Chars} ->
+		list_to_binary(Chars);
+	_ -> Node
+end`;
 
 list_char <- (atom_char / list_wildcards / resp_specials);
 
-literal <- "{" number "}";
+literal <- "{" number "}"`
+[_, Number, _] = Node,
+Number`;
 
-date_time <- '"' date_day_fixed "-" date_month "-" date_year space time space zone '"';
+%% TODO we can convert this into gregorian seconds or something if we need to
+date_time <- '"' date_day_fixed "-" date_month "-" date_year SP time SP zone '"'`
+list_to_binary(lists:sublist(Node, 2, 9))`;
 
 date_day_fixed <- (" " [0-9] / [1-3] [0-9]);
 
@@ -76,15 +107,26 @@ time <- [0-9] [0-9] ":" [0-9] [0-9] ":" [0-9] [0-9];
 
 zone <- ("+" / "-") [0-9] [0-9] [0-9] [0-9];
 
-command_select <- ("CHECK" / "CLOSE" / "EXPUNGE" / copy / fetch / store / uid / search);
+command_select <- (check / close / expunge / copy / fetch / store / uid / search);
 
-copy <- "COPY" space sequence_set space mailbox;
+check <- "CHECK"`
+check`;
 
-fetch <- "FETCH" space sequence_set space ("ALL" / "FULL" / "FAST" / fetch_att_list / fetch_att)`
+close <- "CLOSE"`
+close`;
+
+expunge <- "EXPUNGE"`
+expunge`;
+
+copy <- "COPY" SP sequence_set SP mailbox`
+[_, _, Sequence, _, Mailbox] = Node,
+{copy, Sequence, Mailbox}`;
+
+fetch <- "FETCH" SP sequence_set SP ("ALL" / "FULL" / "FAST" / fetch_att_list / fetch_att)`
 [_, _, Sequence, _, Att] = Node,
 {fetch, Sequence, Att}`;
 
-fetch_att_list <- "(" fetch_att (space fetch_att)* ")"`
+fetch_att_list <- "(" fetch_att (SP fetch_att)* ")"`
 [_, Element, Elements, _] = Node,
 [Element] ++ lists:map(fun([_, E]) -> E end, Elements)`;
 
@@ -99,18 +141,37 @@ case Node of
 	Node -> Node
 end`;
 
-store <- "STORE" space sequence_set space store_att_flags;
+store <- "STORE" SP sequence_set SP store_att_flags`
+[_, _, Sequence, _, Flags] = Node,
+{store, Sequence, Flags}`;
 
-store_att_flags <- ("+" / "-")? "FLAGS" ".SILENT"? space flag_list / (flag (space flag)*);
+% TODO I removed (flag-list / (flag *(SP flag))) and changed it to flag_list
+store_att_flags <- flag_spec:(("+" / "-")? "FLAGS" ".SILENT"?) SP flag_list`
+[{flag_spec, Spec}, _, List] = Node,
+{list_to_binary(Spec), List}`;
 
-flag <- ('\Answered' / '\Flagged' / '\Deleted' / '\Seen' / '\Draft');
+flag <- ("\\Answered" / "\\Flagged" / "\\Deleted" / "\\Seen" / "\\Draft");
 
-flag_list <- "(" (flag (space flag)*)? ")";
+flag_list <- "(" (flag (SP flag)*)? ")"`
+case Node of
+	[_, [], _] -> [];
+	[_, [Flag, Flags], _] ->
+		[Flag] ++ despace(Flags)
+end`;
 
-uid <- "UID" space (copy / fetch / search / store);
+uid <- "UID" SP (copy / fetch / search / store)`
+[_, _, Command] = Node,
+{uid, Command}`;
 
-search <- "SEARCH" (space "CHARSET" space astring) (space search_key)+;
+search <- "SEARCH" (SP "CHARSET" SP astring)? (SP search_key)+`
+case Node of
+	[_, [_, _, _, Charset], Keys] ->
+		{search, Charset, despace(Keys)};
+	[_, [], Keys] ->
+		{search, <<"us-ascii">>, despace(Keys)}
+end`;
 
+%% TODO this is vastly incomplete for now
 search_key <- "ALL";
 
 section <- "[" section_spec? "]"`
@@ -123,7 +184,7 @@ case Node of
 	_ -> Node
 end`;
 
-section_msgtext <- (header_fields:("HEADER.FIELDS" ".NOT"? space header_list) / "HEADER" / "TEXT")`
+section_msgtext <- (header_fields:("HEADER.FIELDS" ".NOT"? SP header_list) / "HEADER" / "TEXT")`
 case Node of
 	{header_fields, [X, Y, _, List]} ->
 		[list_to_binary([X, Y]), List];
@@ -136,7 +197,7 @@ section_part <- nz_number ("." nz_number)*`
 
 section_text <- (section_msgtext / "MIME");
 
-header_list <- "(" header_fld_name (space header_fld_name)* ")"`
+header_list <- "(" header_fld_name (SP header_fld_name)* ")"`
 [<<"(">>,Element,Elements,<<")">>] = Node,
 [Element] ++ lists:map(fun([_, E]) -> E end, Elements)`;
 
@@ -156,15 +217,16 @@ seq_range <- seq_number ":" seq_number`
 [X, _, Y] = Node,
 {X, Y}`;
 
-space <- " ";
+SP <- " ";
 
 CRLF <- "\r\n";
 
 mailbox <- (inbox / astring);
 
-inbox <- ("I" / "i") ("N" / "n") ("B" / "b") ("O" / "o") ("X" / "x");
+inbox <- [Ii] [Nn] [Bb] [Oo] [Xx]`
+inbox`;
 
-astring <- (astring:astring_char+ / string)`
+astring <- (string / astring:astring_char+)`
 case Node of
 	{astring, Iolist} ->
 		list_to_binary(lists:flatten(Iolist));
@@ -192,7 +254,7 @@ list_to_binary(Node)`;
 
 atom_char <- (!atom_specials .);
 
-atom_specials <- ("(" / ")" / "{" / " " / ctl / list_wildcards / quoted_specials / resp_specials);
+atom_specials <- ("(" / ")" / "{" / " " / CTL / list_wildcards / quoted_specials / resp_specials);
 
 list_wildcards <- ("%" / "*");
 
@@ -200,4 +262,16 @@ quoted_specials <- ("\\\\" /  '\\"');
 
 resp_specials <- "]";
 
-ctl <- ("\000" / "\001" / "\002" / "\003" / "\004" / "\005" / "\006" / "\007" / "\b" / "\t" / "\n" / "\v" / "\f" / "\r" / "\016" / "\017" / "\020" / "\021" / "\022" / "\023" / "\024" / "\025" / "\026" / "\027" / "\030" / "\031" / "\032" / "\033" / "\034" / "\035" / "\036" / "\037" / "\177");
+CTL <- ("\000" / "\001" / "\002" / "\003" / "\004" / "\005" / "\006" / "\007" / "\b" / "\t" / "\n" / "\v" / "\f" / "\r" / "\016" / "\017" / "\020" / "\021" / "\022" / "\023" / "\024" / "\025" / "\026" / "\027" / "\030" / "\031" / "\032" / "\033" / "\034" / "\035" / "\036" / "\037" / "\177");
+
+
+`
+%% helper functions
+despace(List) ->
+	lists:map(fun([_, E]) -> E end, List).
+
+despace_once([]) ->
+	undefined;
+despace_once([_, E]) ->
+	E.
+`
