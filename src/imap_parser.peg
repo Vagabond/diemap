@@ -130,12 +130,14 @@ fetch_att_list <- "(" fetch_att (SP fetch_att)* ")"`
 [_, Element, Elements, _] = Node,
 [Element] ++ lists:map(fun([_, E]) -> E end, Elements)`;
 
-fetch_att <- ("ENVELOPE" / "FLAGS" / "INTERNALDATE" / "RFC822" (".HEADER" / ".SIZE" / ".TEXT")? / "UID" / body_section:("BODY" section ("<" number "." nz_number ">")?) / body_section:("BODY.PEEK" section ("<" number "." nz_number ">")?) / body_structure:("BODY" ".STRUCTURE"?))`
+fetch_att <- ("ENVELOPE" / "FLAGS" / "INTERNALDATE" / rfc822:("RFC822" (".HEADER" / ".SIZE" / ".TEXT")?) / "UID" / body_section:("BODY" section ("<" number "." nz_number ">")?) / body_section:("BODY.PEEK" section ("<" number "." nz_number ">")?) / body_structure:("BODY" ".STRUCTURE"?))`
 case Node of
 	{body_section, [B, Sections, []]} ->
 		[B, Sections];
 	{body_section, [B, Sections, [_, Start, _, End, _]]} ->
 		[B, Sections, {Start, End}];
+	{rfc822, L} ->
+		list_to_binary(L);
 	{body_structure, L} ->
 		list_to_binary(L);
 	Node -> Node
