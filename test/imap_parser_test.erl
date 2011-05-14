@@ -43,7 +43,8 @@ examine_test() ->
 list_test() ->
 	?assertEqual({<<"Tag">>, {list, <<>>, <<>>}}, imap_parser:parse("Tag LIST \"\" \"\"\r\n")),
 	?assertEqual({<<"Tag">>, {list, <<"/usr/staff/jones">>, <<>>}}, imap_parser:parse("Tag LIST /usr/staff/jones \"\"\r\n")),
-	?assertEqual({<<"Tag">>, {list, <<"~/Mail/">>, <<"%">>}}, imap_parser:parse("Tag LIST ~/Mail/ %\r\n")).
+	?assertEqual({<<"Tag">>, {list, <<"~/Mail/">>, <<"%">>}}, imap_parser:parse("Tag LIST ~/Mail/ %\r\n")),
+	?assertEqual({<<"Tag">>, {list, <<>>, <<"*">>}}, imap_parser:parse("Tag LIST \"\" *\r\n")).
 
 lsub_test() ->
 	?assertEqual({<<"Tag">>, {lsub, <<>>, <<>>}}, imap_parser:parse("Tag LSUB \"\" \"\"\r\n")),
@@ -100,7 +101,9 @@ search_test() ->
 
 uid_test() ->
 	?assertEqual({<<"Tag">>, {uid, {copy, [1, 2, 3, {9, '*'}], <<"mybox">>}}}, imap_parser:parse("Tag UID COPY 1,2,3,9:* mybox\r\n")),
-	?assertEqual({<<"Tag">>, {uid, {fetch, [15, 16], <<"BODY">>}}}, imap_parser:parse("Tag UID FETCH 15,16 BODY\r\n")),
+	?assertEqual({<<"Tag">>, {uid, {fetch, [15, 16], [<<"UID">>, <<"BODY">>]}}}, imap_parser:parse("Tag UID FETCH 15,16 BODY\r\n")),
+	?assertEqual({<<"Tag">>, {uid, {fetch, [15, 16], [<<"UID">>, <<"FLAGS">>]}}}, imap_parser:parse("Tag UID FETCH 15,16 (FLAGS)\r\n")),
+	?assertEqual({<<"Tag">>, {uid, {fetch, [15, 16], [<<"FLAGS">>, <<"UID">>]}}}, imap_parser:parse("Tag UID FETCH 15,16 (FLAGS UID)\r\n")),
 	?assertEqual({<<"Tag">>, {uid, {fetch, [{27446589, 27446606}], [<<"INTERNALDATE">>, <<"UID">>, <<"RFC822.SIZE">>, <<"FLAGS">>, [<<"BODY.PEEK">>, [<<"HEADER.FIELDS">>, [<<"date">>, <<"subject">>, <<"from">>, <<"to">>, <<"cc">>, <<"message-id">>, <<"in-reply-to">>, <<"references">>]]]]}}}, imap_parser:parse("Tag UID FETCH 27446589:27446606 (INTERNALDATE UID RFC822.SIZE FLAGS BODY.PEEK[HEADER.FIELDS (date subject from to cc message-id in-reply-to references)])\r\n")),
 	?assertEqual({<<"Tag">>, {uid, {search, <<"us-ascii">>, [<<"ALL">>]}}}, imap_parser:parse("Tag UID SEARCH ALL\r\n")),
 	?assertEqual({<<"Tag">>, {uid, {store, [1, 2, 3, {9, '*'}], {<<"+FLAGS.SILENT">>, [<<"\\Seen">>, <<"\\Draft">>]}}}}, imap_parser:parse("Tag UID STORE 1,2,3,9:* +FLAGS.SILENT (\\Seen \\Draft)\r\n")).

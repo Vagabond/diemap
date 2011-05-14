@@ -3,8 +3,8 @@ command <- tag SP (command_any / command_nonauth / command_auth / command_select
 [Tag, _, Command, _] = Node,
 {Tag, Command}`;
 
-command_any <- ("CAPABILITY" / "LOGOUT" / "NOOP")`
-case Node of
+command_any <- ([Cc] [Aa] [Pp] [Aa] [Bb] [Ii] [Ll] [Ii] [Tt] [Yy] / [Ll] [Oo] [Gg] [Oo] [Uu] [Tt] / [Nn] [Oo] [Oo] [Pp])`
+case binstr:to_upper(list_to_binary(Node)) of
 	<<"CAPABILITY">> -> capability;
 	<<"LOGOUT">> -> logout;
 	<<"NOOP">> -> noop
@@ -12,7 +12,7 @@ end`;
 
 command_nonauth <- (login / authenticate / starttls);
 
-login <- "LOGIN" SP username SP password`
+login <- ([Ll] [Oo] [Gg] [Ii] [Nn]) SP username SP password`
 [_, _, UserName, _, Password] = Node,
 {login, UserName, Password}`;
 
@@ -35,7 +35,7 @@ append <- "APPEND" SP mailbox (SP flag_list)? (SP date_time)? SP literal`
 [_, _, Mailbox, Flags, Date, _, Size] = Node,
 {append, Mailbox, despace_once(Flags), despace_once(Date), Size}`;
 
-create <- "CREATE" SP mailbox`
+create <- ([Cc] [Rr] [Ee] [Aa] [Tt] [Ee]) SP mailbox`
 [_, _, Mailbox] = Node,
 {create, Mailbox}`;
 
@@ -47,11 +47,11 @@ examine <- "EXAMINE" SP mailbox`
 [_, _, Mailbox] = Node,
 {examine, Mailbox}`;
 
-list <- "LIST" SP mailbox SP list_mailbox`
+list <- ([Ll] [Ii] [Ss] [Tt]) SP mailbox SP list_mailbox`
 [_, _, Reference, _, Mailbox] = Node,
 {list, Reference, Mailbox}`;
 
-lsub <- "LSUB" SP mailbox SP list_mailbox`
+lsub <- ([Ll] [Ss] [Uu] [Bb]) SP mailbox SP list_mailbox`
 [_, _, Reference, _, Mailbox] = Node,
 {lsub, Reference, Mailbox}`;
 
@@ -59,7 +59,7 @@ rename <- "RENAME" SP mailbox SP mailbox`
 [_, _, OldMailbox, _, NewMailbox] = Node,
 {rename, OldMailbox, NewMailbox}`;
 
-select <- "SELECT" SP mailbox`
+select <- ([Ss] [Ee] [Ll] [Ee] [Cc] [Tt]) SP mailbox`
 [_, _, Mailbox] = Node,
 {select, Mailbox}`;
 
@@ -67,7 +67,7 @@ status <- "STATUS" SP mailbox SP "(" status_att (SP status_att)* ")"`
 [_, _, Mailbox, _, _, Status, Statuses, _] = Node,
 {status, Mailbox, [Status] ++ despace(Statuses)}`;
 
-subscribe <- "SUBSCRIBE" SP mailbox`
+subscribe <- ([Ss] [Uu] [Bb] [Ss] [Cc] [Rr] [Ii] [Bb] [Ee]) SP mailbox`
 [_, _, Mailbox] = Node,
 {subscribe, Mailbox}`;
 
@@ -109,10 +109,10 @@ zone <- ("+" / "-") [0-9] [0-9] [0-9] [0-9];
 
 command_select <- (check / close / expunge / copy / fetch / store / uid / search);
 
-check <- "CHECK"`
+check <- [Cc] [Hh] [Ee] [Cc] [Kk]`
 check`;
 
-close <- "CLOSE"`
+close <- [Cc] [Ll] [Oo] [Ss] [Ee]`
 close`;
 
 expunge <- "EXPUNGE"`
@@ -122,7 +122,7 @@ copy <- "COPY" SP sequence_set SP mailbox`
 [_, _, Sequence, _, Mailbox] = Node,
 {copy, Sequence, Mailbox}`;
 
-fetch <- "FETCH" SP sequence_set SP ("ALL" / "FULL" / "FAST" / fetch_att_list / fetch_att)`
+fetch <- ([Ff] [Ee] [Tt] [Cc] [Hh]) SP sequence_set SP ("ALL" / "FULL" / "FAST" / fetch_att_list / fetch_att)`
 [_, _, Sequence, _, Att] = Node,
 {fetch, Sequence, Att}`;
 
@@ -130,7 +130,7 @@ fetch_att_list <- "(" fetch_att (SP fetch_att)* ")"`
 [_, Element, Elements, _] = Node,
 [Element] ++ lists:map(fun([_, E]) -> E end, Elements)`;
 
-fetch_att <- ("ENVELOPE" / "FLAGS" / "INTERNALDATE" / rfc822:("RFC822" (".HEADER" / ".SIZE" / ".TEXT")?) / "UID" / body_section:("BODY" section ("<" number "." nz_number ">")?) / body_section:("BODY.PEEK" section ("<" number "." nz_number ">")?) / body_structure:("BODY" ".STRUCTURE"?))`
+fetch_att <- ("ENVELOPE" / "FLAGS" / "INTERNALDATE" / rfc822:("RFC822" (".HEADER" / ".SIZE" / ".TEXT")?) / "UID" / body_section:("BODY" section ("<" number "." nz_number ">")?) / body_section:("BODY.PEEK" section ("<" number "." nz_number ">")?) / body_structure:("BODY" "STRUCTURE"?))`
 case Node of
 	{body_section, [B, Sections, []]} ->
 		[B, Sections];
@@ -143,12 +143,12 @@ case Node of
 	Node -> Node
 end`;
 
-store <- "STORE" SP sequence_set SP store_att_flags`
+store <- ([Ss] [Tt] [Oo] [Rr] [Ee]) SP sequence_set SP store_att_flags`
 [_, _, Sequence, _, Flags] = Node,
 {store, Sequence, Flags}`;
 
 % TODO I removed (flag-list / (flag *(SP flag))) and changed it to flag_list
-store_att_flags <- flag_spec:(("+" / "-")? "FLAGS" ".SILENT"?) SP flag_list`
+store_att_flags <- flag_spec:(("+" / "-")? ([Ff] [Ll] [Aa] [Gg] [Ss]) ("." [Ss] [Ii] [Ll] [Ee] [Nn] [Tt])?) SP flag_list`
 [{flag_spec, Spec}, _, List] = Node,
 {list_to_binary(Spec), List}`;
 
@@ -161,8 +161,21 @@ case Node of
 		[Flag] ++ despace(Flags)
 end`;
 
-uid <- "UID" SP (copy / fetch / search / store)`
-[_, _, Command] = Node,
+uid <- ([Uu] [Ii] [Dd]) SP (copy / fetch / search / store)`
+[_, _, Cmd] = Node,
+Command = case Cmd of
+	{fetch, Seq, Atts} when is_list(Atts) ->
+		case lists:member(<<"UID">>, Atts) of
+			false ->
+				{fetch, Seq, [<<"UID">> | Atts]};
+			_ ->
+				Cmd
+		end;
+	{fetch, Seq, Atts} when is_binary(Atts), Atts /= <<"UID">> ->
+		{fetch, Seq, [<<"UID">>, Atts]};
+	_ ->
+		Cmd
+end,
 {uid, Command}`;
 
 search <- "SEARCH" (SP "CHARSET" SP astring)? (SP search_key)+`
