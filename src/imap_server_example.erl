@@ -1,6 +1,6 @@
 -module(imap_server_example).
 
--export([init/2, handle_CAPABILITY/2, handle_NOOP/1, handle_LOGOUT/1, handle_LOGIN/3, handle_SELECT/2, handle_FETCH/5, handle_LIST/3, handle_CLOSE/1, handle_STATUS/3]).
+-export([init/2, handle_CAPABILITY/2, handle_NOOP/1, handle_LOGOUT/1, handle_LOGIN/3, handle_SELECT/2, handle_FETCH/5, handle_LIST/3, handle_CLOSE/1, handle_STATUS/3, handle_LSUB/3]).
 
 -include_lib("kernel/include/file.hrl").
 
@@ -69,68 +69,71 @@ mailbox_details(Mailbox, State) ->
 mail_details(Uid, Attributes, true, Files, Cb, _State) -> %% UID fetch
 	case lists:dropwhile(fun(F) -> {ok, FInfo} = file:read_file_info(F), FInfo#file_info.inode =/= Uid end, Files) of
 		[File|Rest] ->
-			%io:format("found file ~p for UID ~p~n", [File, Uid]),
-			{ok, FInfo} = file:read_file_info(File),
-			{ok, Bin} = file:read_file(File),
-			Seq = length(Files) - length(Rest),
-			%% XXX make sure UID is in the list of Attributes
-			try mimemail:decode(Bin) of
-				Message ->
-					Result = ["* ", integer_to_list(Seq), " FETCH ",  encode_fetch_response([get_attribute(File, FInfo, Message, Attribute) || Attribute <- Attributes], []), "\r\n"],
-					%io:format("Results ~p~n", [list_to_binary(Result)]),
-					Cb(Result)
-			catch
-				What:Why ->
-					io:format("Failed to parse message ~p:~p~n", [What, Why]),
-					[]
-			end;
+				Seq = length(Files) - length(Rest),
+				Result = ["* ", integer_to_list(Seq), " FETCH ",  encode_fetch_response(get_attribute(File, undefined, undefined, Attributes, []), []), "\r\n"],
+				Cb(Result);
 		[] ->
 			io:format("no such UID id ~p~n", [Uid]),
 			[]
 	end;
 mail_details(Seq, Attributes, _, Files, Cb, _State) ->
 	File = lists:nth(Seq, Files),
-	{ok, FInfo} = file:read_file_info(File),
-	{ok, Bin} = file:read_file(File),
-	try mimemail:decode(Bin) of
-		Message ->
-			%io:format("fetching message ~p~n", [Seq]),
-			Result = ["* ", integer_to_list(Seq), " FETCH ",  encode_fetch_response([get_attribute(File, FInfo, Message, Attribute) || Attribute <- Attributes], []), "\r\n"],
-			%io:format("Results ~p~n", [list_to_binary(Result)]),
-			Cb(Result)
-	catch
-		What:Why ->
-			io:format("Failed to parse message ~p:~p~n", [What, Why]),
-			[]
-	end.
+	Result = ["* ", integer_to_list(Seq), " FETCH ",  encode_fetch_response(get_attribute(File, undefined, undefined, Attributes, []), []), "\r\n"],
+	Cb(Result).
 
 safe_mailbox(inbox) ->
 	"inbox";
 safe_mailbox(M) ->
 	M.
 
-get_attribute(_File, FInfo, _Message, <<"UID">>) ->
-	{<<"UID">>, FInfo#file_info.inode};
-get_attribute(_File, _FInfo, _Message, <<"FLAGS">>) ->
-	{<<"FLAGS">>, [[<<"\\Seen">>]]};
-get_attribute(_File, FInfo, _Message, <<"INTERNALDATE">>) ->
+get_finfo(File, undefined) ->
+	{ok, FInfo} = file:read_file_info(File),
+	FInfo;
+get_finfo(_, FInfo) ->
+	FInfo.
+
+get_message(File, undefined) ->
+	{ok, Bin} = file:read_file(File),
+	try mimemail:decode(Bin) of
+		Message ->
+			Message
+	catch
+		What:Why ->
+			io:format("Failed to parse message ~p:~p~n", [What, Why]),
+			error
+	end;
+get_message(_, Message) ->
+	Message.
+
+get_attribute(_, _, _, [], Acc) ->
+	lists:reverse(Acc);
+get_attribute(File, FInfo0, Message, [<<"UID">>|T], Acc) ->
+	FInfo = get_finfo(File, FInfo0),
+	get_attribute(File, FInfo, Message, T, [{<<"UID">>, FInfo#file_info.inode} | Acc]);
+get_attribute(File, FInfo, Message, [<<"FLAGS">>|T], Acc) ->
+	get_attribute(File, FInfo, Message, T, [{<<"FLAGS">>, [[<<"\\Seen">>]]} | Acc]);
+get_attribute(File, FInfo0, Message, [<<"INTERNALDATE">>|T], Acc) ->
+	FInfo = get_finfo(File, FInfo0),
 	MTime = FInfo#file_info.mtime,
 	Date = dh_date:format("j-M-Y i:G:s +0500", MTime),
-	{<<"INTERNALDATE">>, list_to_binary([$", Date, $"])};
-get_attribute(_File, FInfo, _Message, <<"RFC822.SIZE">>) ->
-	{<<"RFC822.SIZE">>, FInfo#file_info.size};
-get_attribute(_File, _FInfo, Message, [<<"BODY", _/binary>>, [Y, Fields]] = _Key) ->
+	get_attribute(File, FInfo, Message, T, [{<<"INTERNALDATE">>, list_to_binary([$", Date, $"])} | Acc]);
+get_attribute(File, FInfo0, Message, [<<"RFC822.SIZE">>|T], Acc) ->
+	FInfo = get_finfo(File, FInfo0),
+	get_attribute(File, FInfo, Message, T, [{<<"RFC822.SIZE">>, FInfo#file_info.size} | Acc]);
+get_attribute(File, FInfo, Message0, [[<<"BODY", _/binary>>, [Y, Fields]]|T], Acc) ->
+	Message = get_message(File, Message0),
 	Headers = get_headers(Fields, Message, []),
 	%io:format("Headers ~p~n", [Headers]),
-	{list_to_binary(["BODY[",Y," (", string:join(lists:map(fun(Z) -> [Z] end, Fields), " "), ")]"]), list_to_binary(["{", integer_to_list(byte_size(Headers)), "}\r\n", Headers])};
-	%{Key, {literal, list_to_binary(get_headers(Fields, Message, []))};
-get_attribute(File, _FInfo, _Message, [<<"BODY", _/binary>>, []] = _Key) ->
+	Att = {list_to_binary(["BODY[",Y," (", string:join(lists:map(fun(Z) -> [Z] end, Fields), " "), ")]"]), list_to_binary(["{", integer_to_list(byte_size(Headers)), "}\r\n", Headers])},
+	get_attribute(File, FInfo, Message, T, [Att | Acc]);
+get_attribute(File, FInfo, Message, [[<<"BODY", _/binary>>, []]|T], Acc) ->
 	{ok, Bin} = file:read_file(File),
 	%{_Headers, Body} = mimemail:parse_headers(Bin),
-	{<<"BODY[]">>, list_to_binary(["{", integer_to_list(byte_size(Bin) + 4), "}\r\n", Bin, "\r\n\r\n"])};
-get_attribute(_File, _FInfo, _Message, Att) ->
+	Att = {<<"BODY[]">>, list_to_binary(["{", integer_to_list(byte_size(Bin) + 4), "}\r\n", Bin, "\r\n\r\n"])},
+	get_attribute(File, FInfo, Message, T, [Att | Acc]);
+get_attribute(File, FInfo, Message, [Att|T], Acc) ->
 	io:format("unsupported attribute ~p~n", [Att]),
-	error.
+	get_attribute(File, FInfo, Message, T, Acc).
 
 get_headers([], _, Acc) ->
 	list_to_binary([lists:reverse(Acc), "\r\n"]);
@@ -213,6 +216,13 @@ handle_LIST(_, M, #state{user=User}) ->
 					[]
 			end
 	end.
+
+handle_LSUB(_, M, State) when M == <<"*">>; M == <<"%">> ->
+	FolderDir = list_to_binary(["maildir/", State#state.user]),
+	{ok, Contents} = file:list_dir(FolderDir),
+	Directories = [filename:join(FolderDir, X) || X <- Contents, filelib:is_dir(filename:join(FolderDir, X))],
+	[["* LSUB () \"/\" ", binstr:substr(Dir, byte_size(FolderDir) + 2), "\r\n"] || Dir <- Directories].
+
 
 handle_CLOSE(State) ->
 	{ok, State#state{folder=undefined}}.

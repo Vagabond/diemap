@@ -144,7 +144,7 @@ handle_command(Tag, {list, Reference, Mailbox},
 			{noreply, State}
 	end;
 handle_command(Tag, {lsub, Reference, Mailbox},
-	#state{socket=Socket,transport=Transport,module=_Module,modstate=_ModState,connstate=C} = State) when C > ?UNAUTH ->
+	#state{socket=Socket,transport=Transport,module=Module,modstate=ModState,connstate=C} = State) when C > ?UNAUTH ->
 	case [Reference, Mailbox] of
 		[Reference, <<>>] ->
 			Root = case Reference of
@@ -160,7 +160,8 @@ handle_command(Tag, {lsub, Reference, Mailbox},
 			%reply(Transport, Socket, ["* LIST () \"/\" inbox\r\n", "* LIST () \"/\" sent_items\r\n", Tag, " OK LIST Completed\r\n"]),
 			%{noreply, State};
 		[Reference, Mailbox] ->
-			reply(Transport, Socket, [Tag, " OK LSUB Completed\r\n"]),
+			ListResults = Module:handle_LSUB(Reference, Mailbox, ModState),
+			reply(Transport, Socket, ListResults ++ [Tag, " OK LSUB Completed\r\n"]),
 			%reply(Transport, Socket, [Tag, " BAD LIST no such mailbox\r\n"]),
 			{noreply, State}
 	end;
