@@ -131,9 +131,19 @@ get_attribute(File, FInfo, Message, [[<<"BODY", _/binary>>, []]|T], Acc) ->
 	%{_Headers, Body} = mimemail:parse_headers(Bin),
 	Att = {<<"BODY[]">>, list_to_binary(["{", integer_to_list(byte_size(Bin) + 4), "}\r\n", Bin, "\r\n\r\n"])},
 	get_attribute(File, FInfo, Message, T, [Att | Acc]);
+get_attribute(File, FInfo, Message0, [<<"BODYSTRUCTURE">>|T], Acc) ->
+	Message = get_message(File, Message0),
+	BS = make_bodystructure(Message),
+	io:format("Bodystructure ~p~n", [list_to_binary(BS)]),
+	get_attribute(File, FInfo, Message, T, [{<<"BODYSTRUCTURE">>, list_to_binary(BS)}|Acc]);
 get_attribute(File, FInfo, Message, [Att|T], Acc) ->
 	io:format("unsupported attribute ~p~n", [Att]),
 	get_attribute(File, FInfo, Message, T, Acc).
+
+make_bodystructure({<<"multipart">>, SubType, _Header, _Params, BodyParts}) ->
+	["(", [make_bodystructure(Part) || Part <- BodyParts], " \"", SubType, "\")"];
+make_bodystructure({Type, SubType, _Header, _Params, Body}) ->
+	["(\"", Type, "\" \"", SubType, "\" (\"CHARSET\" \"us-ascii\") NIL NIL \"7BIT\" ", integer_to_list(byte_size(Body)), " ", integer_to_list(length(binstr:split(Body, <<"\n">>))), ")"].
 
 get_headers([], _, Acc) ->
 	list_to_binary([lists:reverse(Acc), "\r\n"]);
