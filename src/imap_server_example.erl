@@ -55,35 +55,23 @@ mailbox_details(Mailbox, State) ->
 	FolderDir = list_to_binary(["maildir/", State#state.user, "/", safe_mailbox(Mailbox)]),
 	{ok, Contents} = file:list_dir(FolderDir),
 	Files = [filename:join(FolderDir, X) || X <- Contents, filelib:is_regular(filename:join(FolderDir, X))],
-	Uids = lists:sort([ begin {ok, FInfo} = file:read_file_info(F), FInfo#file_info.inode end || F <- Files]),
-	case Uids of
-		[] ->
-			UidFirst = 0,
-			UidNext = 1;
-		_ ->
-			UidFirst = hd(Uids),
-			UidNext = lists:last(Uids)
-	end,
+	UidFirst = 32001,
+	UidNext = UidFirst + length(Files),
 	{ok, DirInfo} = file:read_file_info(FolderDir),
 	MTime = DirInfo#file_info.mtime,
 	%% this is close enough to the unix timestamp
 	UIDValidity = calendar:datetime_to_gregorian_seconds(MTime) - calendar:datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}}),
-	{length(Files), 0, 0, ["\\Answered", "\\Flagged", "\\Deleted", "\\Seen", "\\Draft"], ["\\Seen"], {UidFirst, UidNext+1}, UIDValidity, read_only}.
+	{length(Files), 0, length(Files) + 1, ["\\Answered", "\\Flagged", "\\Deleted", "\\Seen", "\\Draft"], ["\\Seen"], {UidFirst, UidNext+1}, UIDValidity, read_only}.
 
-mail_details(Uid, Attributes, true, Files, Cb, _State) -> %% UID fetch
-	case lists:dropwhile(fun(F) -> {ok, FInfo} = file:read_file_info(F), FInfo#file_info.inode =/= Uid end, Files) of
-		[File|Rest] ->
-				Seq = length(Files) - length(Rest),
-				Result = ["* ", integer_to_list(Seq), " FETCH ",  encode_fetch_response(get_attribute(File, undefined, undefined, Attributes, []), []), "\r\n"],
-				Cb(Result);
-		[] ->
-			io:format("no such UID id ~p~n", [Uid]),
-			[]
-	end;
-mail_details(Seq, Attributes, _, Files, Cb, _State) ->
+mail_details(Uid, Attributes, true, Files, Cb, State) -> %% UID fetch
+	mail_details(Uid-32000, Attributes, false, Files, Cb, State);
+mail_details(Seq, Attributes, _, Files, Cb, _State) when Seq > 0->
+	%io:format("contents ~p~n", [Files]),
 	File = lists:nth(Seq, Files),
-	Result = ["* ", integer_to_list(Seq), " FETCH ",  encode_fetch_response(get_attribute(File, undefined, undefined, Attributes, []), []), "\r\n"],
-	Cb(Result).
+	Result = ["* ", integer_to_list(Seq), " FETCH ",  encode_fetch_response(get_attribute(File, Seq+32000, undefined, undefined, Attributes, []), []), "\r\n"],
+	Cb(Result);
+mail_details(_Seq, _Attributes, _, _Files, _Cb, _State) ->
+	ok.
 
 safe_mailbox(inbox) ->
 	"inbox";
@@ -109,40 +97,39 @@ get_message(File, undefined) ->
 get_message(_, Message) ->
 	Message.
 
-get_attribute(_, _, _, [], Acc) ->
+get_attribute(_, _, _, _, [], Acc) ->
 	lists:reverse(Acc);
-get_attribute(File, FInfo0, Message, [<<"UID">>|T], Acc) ->
-	FInfo = get_finfo(File, FInfo0),
-	get_attribute(File, FInfo, Message, T, [{<<"UID">>, FInfo#file_info.inode} | Acc]);
-get_attribute(File, FInfo, Message, [<<"FLAGS">>|T], Acc) ->
-	get_attribute(File, FInfo, Message, T, [{<<"FLAGS">>, [[<<"\\Seen">>]]} | Acc]);
-get_attribute(File, FInfo0, Message, [<<"INTERNALDATE">>|T], Acc) ->
+get_attribute(File, UID, FInfo, Message, [<<"UID">>|T], Acc) ->
+	get_attribute(File, UID, FInfo, Message, T, [{<<"UID">>, UID} | Acc]);
+get_attribute(File, UID, FInfo, Message, [<<"FLAGS">>|T], Acc) ->
+	get_attribute(File, UID, FInfo, Message, T, [{<<"FLAGS">>, [[<<"\\Seen">>]]} | Acc]);
+get_attribute(File, UID, FInfo0, Message, [<<"INTERNALDATE">>|T], Acc) ->
 	FInfo = get_finfo(File, FInfo0),
 	MTime = FInfo#file_info.mtime,
 	Date = dh_date:format("j-M-Y G:i:s +0500", MTime),
-	get_attribute(File, FInfo, Message, T, [{<<"INTERNALDATE">>, list_to_binary([$", Date, $"])} | Acc]);
-get_attribute(File, FInfo0, Message, [<<"RFC822.SIZE">>|T], Acc) ->
+	get_attribute(File, UID, FInfo, Message, T, [{<<"INTERNALDATE">>, list_to_binary([$", Date, $"])} | Acc]);
+get_attribute(File, UID, FInfo0, Message, [<<"RFC822.SIZE">>|T], Acc) ->
 	FInfo = get_finfo(File, FInfo0),
-	get_attribute(File, FInfo, Message, T, [{<<"RFC822.SIZE">>, FInfo#file_info.size} | Acc]);
-get_attribute(File, FInfo, Message0, [[<<"BODY", _/binary>>, [Y, Fields]]|T], Acc) ->
+	get_attribute(File, UID, FInfo, Message, T, [{<<"RFC822.SIZE">>, FInfo#file_info.size} | Acc]);
+get_attribute(File, UID, FInfo, Message0, [[<<"BODY", _/binary>>, [Y, Fields]]|T], Acc) ->
 	Message = get_message(File, Message0),
 	Headers = get_headers(Fields, Message, []),
 	%io:format("Headers ~p~n", [Headers]),
 	Att = {list_to_binary(["BODY[",Y," (", string:join(lists:map(fun(Z) -> [Z] end, Fields), " "), ")]"]), list_to_binary(["{", integer_to_list(byte_size(Headers)), "}\r\n", Headers])},
-	get_attribute(File, FInfo, Message, T, [Att | Acc]);
-get_attribute(File, FInfo, Message, [[<<"BODY", _/binary>>, []]|T], Acc) ->
+	get_attribute(File, UID, FInfo, Message, T, [Att | Acc]);
+get_attribute(File, UID, FInfo, Message, [[<<"BODY", _/binary>>, []]|T], Acc) ->
 	{ok, Bin} = file:read_file(File),
 	%{_Headers, Body} = mimemail:parse_headers(Bin),
 	Att = {<<"BODY[]">>, list_to_binary(["{", integer_to_list(byte_size(Bin) + 4), "}\r\n", Bin, "\r\n\r\n"])},
-	get_attribute(File, FInfo, Message, T, [Att | Acc]);
-get_attribute(File, FInfo, Message0, [<<"BODYSTRUCTURE">>|T], Acc) ->
+	get_attribute(File, UID, FInfo, Message, T, [Att | Acc]);
+get_attribute(File, UID, FInfo, Message0, [<<"BODYSTRUCTURE">>|T], Acc) ->
 	Message = get_message(File, Message0),
 	BS = make_bodystructure(Message),
 	io:format("Bodystructure ~p~n", [list_to_binary(BS)]),
-	get_attribute(File, FInfo, Message, T, [{<<"BODYSTRUCTURE">>, list_to_binary(BS)}|Acc]);
-get_attribute(File, FInfo, Message, [Att|T], Acc) ->
+	get_attribute(File, UID, FInfo, Message, T, [{<<"BODYSTRUCTURE">>, list_to_binary(BS)}|Acc]);
+get_attribute(File, UID, FInfo, Message, [Att|T], Acc) ->
 	io:format("unsupported attribute ~p~n", [Att]),
-	get_attribute(File, FInfo, Message, T, Acc).
+	get_attribute(File, UID, FInfo, Message, T, Acc).
 
 make_bodystructure({<<"multipart">>, SubType, _Header, _Params, BodyParts}) ->
 	["(", [make_bodystructure(Part) || Part <- BodyParts], " \"", SubType, "\")"];
@@ -176,17 +163,19 @@ encode_value(Val) ->
 handle_FETCH(Seq, Attributes, UID, Callback, State) ->
 	FolderDir = list_to_binary(["maildir/", State#state.user, "/", safe_mailbox(State#state.folder)]),
 	{ok, Contents} = file:list_dir(FolderDir),
-	Files = [filename:join(FolderDir, X) || X <- Contents, filelib:is_regular(filename:join(FolderDir, X))],
+	%% haskish natural sort
+	SortedContents = lists:sort(fun(A, B) -> list_to_float(A++"0") < list_to_float(B++"0") end, Contents),
+	Files = [filename:join(FolderDir, X) || X <- SortedContents, filelib:is_regular(filename:join(FolderDir, X))],
 	do_fetch(Seq, Attributes, UID, Files, Callback, State, []).
 
 
 do_fetch([], _, _UID, _Contents, _Cb, _State, Acc) ->
 	Acc;
 do_fetch([{S, '*'}|T], Attributes, UID, Contents, Cb, State, Acc) ->
-	{Size, _, _, _, _, {UIDFirst, UIDNext}, _, _} = mailbox_details(State#state.folder, State),
+	{Size, _, _, _, _, {UIDFirst, _UIDNext}, _, _} = mailbox_details(State#state.folder, State),
 	End = case UID of
 		true ->
-			UIDNext;
+			Size + 32000;
 		_ ->
 			Size
 	end,
