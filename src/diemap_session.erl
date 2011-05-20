@@ -190,7 +190,7 @@ handle_command(Tag, check,
 handle_command(Tag, {select, Mailbox},
 	#state{socket=Socket,transport=Transport,module=Module,modstate=ModState,connstate=C} = State) when C > ?UNAUTH ->
 	case Module:handle_SELECT(Mailbox, ModState) of
-		{ok, {Count, Recent, Unseen, Flags, PermanantFlags, {_, UIDNext}, UIDValidity, RW}, NewModState} ->
+		{ok, {Count, Recent, Unseen, Flags, PermanentFlags, {_, UIDNext}, UIDValidity, RW}, NewModState} ->
 			ReadWrite = case RW of
 				read_only ->
 					"READ-ONLY";
@@ -203,7 +203,7 @@ handle_command(Tag, {select, Mailbox},
 					"* OK [UNSEEN ", integer_to_list(Unseen), "]\r\n",
 					"* OK [UIDNEXT ", integer_to_list(UIDNext), "]\r\n",
 					"* OK [UIDVALIDITY ", integer_to_list(UIDValidity), "]\r\n",
-					"* OK [PERMANANTFLAGS (", string:join(PermanantFlags, " "), ")\r\n",
+					"* OK [PERMANENTFLAGS (", string:join(PermanentFlags, " "), ")]\r\n",
 					"* FLAGS (", string:join(Flags, " "), ")\r\n",
 					Tag, " OK [", ReadWrite, "] SELECT completed\r\n"]),
 			{noreply, State#state{mailbox=Mailbox, modstate=NewModState, connstate=?SELECTED}};

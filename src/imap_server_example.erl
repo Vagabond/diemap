@@ -242,7 +242,7 @@ handle_STATUS(Mailbox, Flags, #state{user=User} = State) ->
 	%io:format("Folder ~p~n", [FolderDir]),
 	case filelib:is_dir(FolderDir) of
 		true ->
-			{Count, Recent, Unseen, _Flags, _PermanantFlags, {_, UIDNext}, UIDValidity, _RW} = mailbox_details(Mailbox, State),
+			{Count, Recent, Unseen, _Flags, _PermanentFlags, {_, UIDNext}, UIDValidity, _RW} = mailbox_details(Mailbox, State),
 			Reply = lists:map(fun(<<"UIDNEXT">>) ->
 						["UIDNEXT ", integer_to_list(UIDNext)];
 					(<<"RECENT">>) ->
