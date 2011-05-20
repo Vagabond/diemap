@@ -64,7 +64,11 @@ mailbox_details(Mailbox, State) ->
 			UidFirst = hd(Uids),
 			UidNext = lists:last(Uids)
 	end,
-	{length(Files), 0, 0, ["\\Answered", "\\Flagged", "\\Deleted", "\\Seen", "\\Draft"], [], {UidFirst, UidNext+1}, 987654, read_only}.
+	{ok, DirInfo} = file:read_file_info(FolderDir),
+	MTime = DirInfo#file_info.mtime,
+	%% this is close enough to the unix timestamp
+	UIDValidity = calendar:datetime_to_gregorian_seconds(MTime) - calendar:datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}}),
+	{length(Files), 0, 0, ["\\Answered", "\\Flagged", "\\Deleted", "\\Seen", "\\Draft"], ["\\Seen"], {UidFirst, UidNext+1}, UIDValidity, read_only}.
 
 mail_details(Uid, Attributes, true, Files, Cb, _State) -> %% UID fetch
 	case lists:dropwhile(fun(F) -> {ok, FInfo} = file:read_file_info(F), FInfo#file_info.inode =/= Uid end, Files) of
