@@ -115,7 +115,7 @@ get_attribute(File, FInfo, Message, [<<"FLAGS">>|T], Acc) ->
 get_attribute(File, FInfo0, Message, [<<"INTERNALDATE">>|T], Acc) ->
 	FInfo = get_finfo(File, FInfo0),
 	MTime = FInfo#file_info.mtime,
-	Date = dh_date:format("j-M-Y i:G:s +0500", MTime),
+	Date = dh_date:format("j-M-Y G:i:s +0500", MTime),
 	get_attribute(File, FInfo, Message, T, [{<<"INTERNALDATE">>, list_to_binary([$", Date, $"])} | Acc]);
 get_attribute(File, FInfo0, Message, [<<"RFC822.SIZE">>|T], Acc) ->
 	FInfo = get_finfo(File, FInfo0),
