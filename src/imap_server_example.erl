@@ -255,7 +255,7 @@ handle_STATUS(Mailbox, Flags, #state{user=User} = State) ->
 						["UNSEEN ", integer_to_list(Unseen)]
 				end, Flags),
 
-			{ok, ["* STATUS ", Mailbox, " (", Reply, ")\r\n"], State};
+			{ok, ["* STATUS ", Mailbox, " (", string:join(Reply, " "), ")\r\n"], State};
 		_ ->
 		 {error, "Folder does not exist", State}
  end.
