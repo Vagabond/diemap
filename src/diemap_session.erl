@@ -76,7 +76,7 @@ terminate(_Reason, _State) ->
 	ok.
 
 reply(Transport, Socket, Message) ->
-	io:format("S: ~s", [list_to_binary(Message)]),
+	%io:format("S: ~s", [list_to_binary(Message)]),
 	Transport:send(Socket, Message).
 
 handle_command(Tag, capability,

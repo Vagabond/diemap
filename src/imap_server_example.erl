@@ -164,7 +164,7 @@ handle_FETCH(Seq, Attributes, UID, Callback, State) ->
 	FolderDir = list_to_binary(["maildir/", State#state.user, "/", safe_mailbox(State#state.folder)]),
 	{ok, Contents} = file:list_dir(FolderDir),
 	%% haskish natural sort
-	SortedContents = lists:sort(fun(A, B) -> list_to_float(A++"0") < list_to_float(B++"0") end, Contents),
+	SortedContents = lists:sort(fun(A, B) -> (catch list_to_float(A++"0")) < (catch list_to_float(B++"0")) end, Contents),
 	Files = [filename:join(FolderDir, X) || X <- SortedContents, filelib:is_regular(filename:join(FolderDir, X))],
 	do_fetch(Seq, Attributes, UID, Files, Callback, State, []).
 
