@@ -239,9 +239,12 @@ SP <- " ";
 
 CRLF <- "\r\n";
 
-mailbox <- (inbox / astring);
+mailbox <- (inbox / quoted_inbox / astring);
 
 inbox <- [Ii] [Nn] [Bb] [Oo] [Xx]`
+inbox`;
+
+quoted_inbox <- '"' inbox '"'`
 inbox`;
 
 astring <- (string / astring:astring_char+)`
