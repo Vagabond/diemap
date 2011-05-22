@@ -122,8 +122,20 @@ copy <- "COPY" SP sequence_set SP mailbox`
 [_, _, Sequence, _, Mailbox] = Node,
 {copy, Sequence, Mailbox}`;
 
-fetch <- ([Ff] [Ee] [Tt] [Cc] [Hh]) SP sequence_set SP ("ALL" / "FULL" / "FAST" / fetch_att_list / fetch_att)`
-[_, _, Sequence, _, Att] = Node,
+fetch <- ([Ff] [Ee] [Tt] [Cc] [Hh]) SP sequence_set SP ("ALL" / "FULL" / "FAST" / fetch_att_list / single_att:fetch_att)`
+[_, _, Sequence, _, Att0] = Node,
+Att = case Att0 of
+	<<"ALL">> ->
+		[<<"FLAGS">>, <<"INTERNALDATE">>, <<"RFC822.SIZE">>, <<"ENVELOPE">>];
+	<<"FULL">> ->
+		[<<"FLAGS">>, <<"INTERNALDATE">>, <<"RFC822.SIZE">>, <<"ENVELOPE">>, <<"BODY">>];
+	<<"FAST">> ->
+		[<<"FLAGS">>, <<"INTERNALDATE">>, <<"RFC822.SIZE">>];
+	{single_att, X} ->
+		[X]; %% treat a single fetch attribute as a list of one
+	_ ->
+		Att0
+end,
 {fetch, Sequence, Att}`;
 
 fetch_att_list <- "(" fetch_att (SP fetch_att)* ")"`

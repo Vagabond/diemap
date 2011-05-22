@@ -81,13 +81,17 @@ copy_test() ->
 	?assertEqual({<<"Tag">>, {copy, [1, 2, 3, {9, '*'}], <<"mybox">>}}, imap_parser:parse("Tag COPY 1,2,3,9:* mybox\r\n")).
 	
 fetch_test() ->
-	?assertEqual({<<"Tag">>, {fetch, [15, 16], <<"BODY">>}}, imap_parser:parse("Tag FETCH 15,16 BODY\r\n")),
-	?assertEqual({<<"Tag">>, {fetch, [15, 16], [<<"BODY">>, [1, 2, 3]]}}, imap_parser:parse("Tag FETCH 15,16 BODY[1.2.3]\r\n")),
-	?assertEqual({<<"Tag">>, {fetch, [15, 16], [<<"BODY">>, [1, 2, 3, [<<"HEADER">>]]]}}, imap_parser:parse("Tag FETCH 15,16 BODY[1.2.3.HEADER]\r\n")),
-	?assertEqual({<<"Tag">>, {fetch, [15, 16], [<<"BODY">>, [1, 2, 3, [<<"HEADER.FIELDS">>, [<<"From">>]]]]}}, imap_parser:parse("Tag FETCH 15,16 BODY[1.2.3.HEADER.FIELDS (From)]\r\n")),
-	?assertEqual({<<"Tag">>, {fetch, [15, 16], [<<"BODY">>, [1, 2, 3, [<<"HEADER.FIELDS">>, [<<"From">>, <<"To">>, <<"Date">>, <<"Subject">>]]]]}}, imap_parser:parse("Tag FETCH 15,16 BODY[1.2.3.HEADER.FIELDS (From To Date Subject)]\r\n")),
+	?assertEqual({<<"Tag">>, {fetch, [15, 16], [<<"BODY">>]}}, imap_parser:parse("Tag FETCH 15,16 BODY\r\n")),
+	?assertEqual({<<"Tag">>, {fetch, [15, 16], [[<<"BODY">>, [1, 2, 3]]]}}, imap_parser:parse("Tag FETCH 15,16 BODY[1.2.3]\r\n")),
+	?assertEqual({<<"Tag">>, {fetch, [15, 16], [[<<"BODY">>, [1, 2, 3, [<<"HEADER">>]]]]}}, imap_parser:parse("Tag FETCH 15,16 BODY[1.2.3.HEADER]\r\n")),
+	?assertEqual({<<"Tag">>, {fetch, [15, 16], [[<<"BODY">>, [1, 2, 3, [<<"HEADER.FIELDS">>, [<<"From">>]]]]]}}, imap_parser:parse("Tag FETCH 15,16 BODY[1.2.3.HEADER.FIELDS (From)]\r\n")),
+	?assertEqual({<<"Tag">>, {fetch, [15, 16], [[<<"BODY">>, [1, 2, 3, [<<"HEADER.FIELDS">>, [<<"From">>, <<"To">>, <<"Date">>, <<"Subject">>]]]]]}}, imap_parser:parse("Tag FETCH 15,16 BODY[1.2.3.HEADER.FIELDS (From To Date Subject)]\r\n")),
 	?assertEqual({<<"Tag">>, {fetch, [15, 16], [<<"UID">>, <<"FLAGS">>, [<<"BODY">>, [1, 2, 3, [<<"HEADER.FIELDS">>, [<<"From">>, <<"To">>, <<"Date">>, <<"Subject">>]]]]]}}, imap_parser:parse("Tag FETCH 15,16 (UID FLAGS BODY[1.2.3.HEADER.FIELDS (From To Date Subject)])\r\n")),
-	?assertEqual({<<"Tag">>, {fetch, [15, 16], [<<"BODY">>, [1], {0, 65535}]}}, imap_parser:parse("Tag FETCH 15,16 BODY[1]<0.65535>\r\n")),
+	?assertEqual({<<"Tag">>, {fetch, [15, 16], [[<<"BODY">>, [1], {0, 65535}]]}}, imap_parser:parse("Tag FETCH 15,16 BODY[1]<0.65535>\r\n")),
+	?assertEqual({<<"Tag">>, {fetch, [15, 16], [[<<"BODY">>, []]]}}, imap_parser:parse("Tag FETCH 15,16 BODY[]\r\n")),
+	?assertEqual({<<"Tag">>, {fetch, [15, 16], [[<<"BODY.PEEK">>, []]]}}, imap_parser:parse("Tag FETCH 15,16 BODY.PEEK[]\r\n")),
+	
+	?assertEqual({<<"Tag">>, {fetch, [15, 16], [<<"FLAGS">>, <<"INTERNALDATE">>, <<"RFC822.SIZE">>, <<"ENVELOPE">>, <<"BODY">>]}}, imap_parser:parse("Tag FETCH 15,16 FULL\r\n")),
 	ok.
 
 store_test() ->
