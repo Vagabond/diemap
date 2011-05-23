@@ -149,6 +149,15 @@ get_attribute(File, UID, FInfo, Message0, [<<"BODYSTRUCTURE">>|T], Acc) ->
 	BS = make_bodystructure(Message),
 	%io:format("Bodystructure ~p~n", [list_to_binary(BS)]),
 	get_attribute(File, UID, FInfo, Message, T, [{<<"BODYSTRUCTURE">>, list_to_binary(BS)}|Acc]);
+get_attribute(File, UID, FInfo, Message0, [<<"ENVELOPE">>|T], Acc) ->
+	{_, _, Headers, _, _} = Message = get_message(File, Message0),
+	%% date, subject, from, sender, reply-to, to, cc, bcc, in-reply-to, and message-id
+	Env = ["(", get_header(<<"Date">>, Headers), " ", get_header(<<"Subject">>, Headers), " ",
+		get_address_struct(<<"From">>, Headers), " ", get_address_struct(<<"Sender">>, Headers), " ",
+		get_address_struct(<<"Reply-To">>, Headers), " ", get_address_struct(<<"To">>, Headers), " ",
+		get_address_struct(<<"Cc">>, Headers), " ", get_address_struct(<<"Bcc">>, Headers), " ",
+		get_header(<<"In-Reply-To">>, Headers), " ", get_header(<<"Message-ID">>, Headers), ")"],
+	get_attribute(File, UID, FInfo, Message, T, [{<<"ENVELOPE">>, list_to_binary(Env)}|Acc]);
 get_attribute(File, UID, FInfo, Message, [Att|T], Acc) ->
 	io:format("unsupported attribute ~p~n", [Att]),
 	get_attribute(File, UID, FInfo, Message, T, Acc).
@@ -157,6 +166,25 @@ make_bodystructure({<<"multipart">>, SubType, _Header, _Params, BodyParts}) ->
 	["(", [make_bodystructure(Part) || Part <- BodyParts], " \"", SubType, "\")"];
 make_bodystructure({Type, SubType, _Header, _Params, Body}) ->
 	["(\"", Type, "\" \"", SubType, "\" (\"CHARSET\" \"us-ascii\") NIL NIL \"7BIT\" ", integer_to_list(byte_size(Body)), " ", integer_to_list(length(binstr:split(Body, <<"\n">>))), ")"].
+
+get_header(Header, Headers) ->
+	%% either NIL or a quoted string
+	case mimemail:get_header_value(Header, Headers) of
+		undefined ->
+			"NIL";
+		Value ->
+			[$", Value, $"]
+	end.
+
+get_address_struct(Header, Headers) ->
+	case mimemail:get_header_value(Header, Headers) of
+		undefined ->
+			"NIL";
+		Value ->
+			%% lazy hack, not reliable.
+			Users = binstr:split(Value, <<",">>),
+			[begin [Mailbox, Host] = binstr:split(binstr:strip(User), <<"@">>), ["(NIL NIL \"", Mailbox, "\" \"", Host, "\")"] end || User <- Users]
+	end.
 
 get_headers([], _, Acc) ->
 	list_to_binary([lists:reverse(Acc), "\r\n"]);
