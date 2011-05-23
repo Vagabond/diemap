@@ -127,6 +127,18 @@ get_attribute(File, UID, FInfo, Message0, [[<<"BODY", _/binary>>, [Y, Fields]]|T
 	%io:format("Headers ~p~n", [Headers]),
 	Att = {list_to_binary(["BODY[",Y," (", string:join(lists:map(fun(Z) -> [Z] end, Fields), " "), ")]"]), list_to_binary(["{", integer_to_list(byte_size(Headers)), "}\r\n", Headers])},
 	get_attribute(File, UID, FInfo, Message, T, [Att | Acc]);
+get_attribute(File, UID, FInfo, Message, [[<<"BODY", _/binary>>, [], {Start, Len}]|T], Acc) ->
+	{ok, FH} = file:open(File, [read, binary]),
+	Data = case file:pread(FH, {bof, Start}, Len) of
+		{ok, D} ->
+			D;
+		eof ->
+			{ok, Bin} = file:read_file(File),
+			Bin
+	end,
+	ok = file:close(FH),
+	Att = {list_to_binary(["BODY[]"]), list_to_binary(["{", integer_to_list(byte_size(Data)), "}\r\n", Data])},
+	get_attribute(File, UID, FInfo, Message, T, [Att | Acc]);
 get_attribute(File, UID, FInfo, Message, [[<<"BODY", _/binary>>, []]|T], Acc) ->
 	{ok, Bin} = file:read_file(File),
 	%{_Headers, Body} = mimemail:parse_headers(Bin),
@@ -135,7 +147,7 @@ get_attribute(File, UID, FInfo, Message, [[<<"BODY", _/binary>>, []]|T], Acc) ->
 get_attribute(File, UID, FInfo, Message0, [<<"BODYSTRUCTURE">>|T], Acc) ->
 	Message = get_message(File, Message0),
 	BS = make_bodystructure(Message),
-	io:format("Bodystructure ~p~n", [list_to_binary(BS)]),
+	%io:format("Bodystructure ~p~n", [list_to_binary(BS)]),
 	get_attribute(File, UID, FInfo, Message, T, [{<<"BODYSTRUCTURE">>, list_to_binary(BS)}|Acc]);
 get_attribute(File, UID, FInfo, Message, [Att|T], Acc) ->
 	io:format("unsupported attribute ~p~n", [Att]),
