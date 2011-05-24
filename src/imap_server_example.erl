@@ -121,11 +121,11 @@ get_attribute(File, UID, FInfo0, Message, [<<"INTERNALDATE">>|T], Acc) ->
 get_attribute(File, UID, FInfo0, Message, [<<"RFC822.SIZE">>|T], Acc) ->
 	FInfo = get_finfo(File, FInfo0),
 	get_attribute(File, UID, FInfo, Message, T, [{<<"RFC822.SIZE">>, FInfo#file_info.size} | Acc]);
-get_attribute(File, UID, FInfo, Message0, [[<<"BODY", _/binary>>, [Y, Fields]]|T], Acc) ->
+get_attribute(File, UID, FInfo, Message0, [[<<"BODY", _/binary>>, [<<"HEADER.FIELDS">>, Fields]]|T], Acc) ->
 	Message = get_message(File, Message0),
 	Headers = get_headers(Fields, Message, []),
 	%io:format("Headers ~p~n", [Headers]),
-	Att = {list_to_binary(["BODY[",Y," (", string:join(lists:map(fun(Z) -> [Z] end, Fields), " "), ")]"]), list_to_binary(["{", integer_to_list(byte_size(Headers)), "}\r\n", Headers])},
+	Att = {list_to_binary(["BODY[HEADER.FIELDS (", string:join(lists:map(fun(Z) -> [Z] end, Fields), " "), ")]"]), list_to_binary(["{", integer_to_list(byte_size(Headers)), "}\r\n", Headers])},
 	get_attribute(File, UID, FInfo, Message, T, [Att | Acc]);
 get_attribute(File, UID, FInfo, Message, [[<<"BODY", _/binary>>, [], {Start, Len}]|T], Acc) ->
 	{ok, FH} = file:open(File, [read, binary]),
@@ -142,7 +142,21 @@ get_attribute(File, UID, FInfo, Message, [[<<"BODY", _/binary>>, [], {Start, Len
 get_attribute(File, UID, FInfo, Message, [[<<"BODY", _/binary>>, []]|T], Acc) ->
 	{ok, Bin} = file:read_file(File),
 	%{_Headers, Body} = mimemail:parse_headers(Bin),
-	Att = {<<"BODY[]">>, list_to_binary(["{", integer_to_list(byte_size(Bin) + 4), "}\r\n", Bin, "\r\n\r\n"])},
+	Att = {<<"BODY[]">>, list_to_binary(["{", integer_to_list(byte_size(Bin) + 2), "}\r\n", Bin, "\r\n"])},
+	get_attribute(File, UID, FInfo, Message, T, [Att | Acc]);
+get_attribute(File, UID, FInfo, Message0, [[<<"BODY", _/binary>>, [1]]|T], Acc) ->
+	{_, _, _, _, Body} = Message = get_message(File, Message0),
+	Att = {<<"BODY[1]">>, list_to_binary(["{", integer_to_list(byte_size(Body) + 2), "}\r\n", Body, "\r\n"])},
+	get_attribute(File, UID, FInfo, Message, T, [Att | Acc]);
+get_attribute(File, UID, FInfo, Message, [[<<"BODY", _/binary>>, [<<"HEADER">>]]|T], Acc) ->
+	{ok, Bin} = file:read_file(File),
+	[Header, _] = binstr:split(Bin, <<"\r\n\r\n">>, 2),
+	Att = {<<"BODY[HEADER]">>, list_to_binary(["{", integer_to_list(byte_size(Header) + 2), "}\r\n", Header, "\r\n"])},
+	get_attribute(File, UID, FInfo, Message, T, [Att | Acc]);
+get_attribute(File, UID, FInfo, Message, [[<<"BODY", _/binary>>, [<<"TEXT">>]]|T], Acc) ->
+	{ok, Bin} = file:read_file(File),
+	[_, Body] = binstr:split(Bin, <<"\r\n\r\n">>, 2),
+	Att = {<<"BODY[TEXT]">>, list_to_binary(["{", integer_to_list(byte_size(Body) + 2), "}\r\n", Body, "\r\n"])},
 	get_attribute(File, UID, FInfo, Message, T, [Att | Acc]);
 get_attribute(File, UID, FInfo, Message0, [<<"BODYSTRUCTURE">>|T], Acc) ->
 	Message = get_message(File, Message0),
