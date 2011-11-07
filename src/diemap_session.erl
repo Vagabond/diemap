@@ -5,7 +5,7 @@
 %% gen_server exports$
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 %% other exports
--export([start_link/3]).
+-export([start_link/3, start/3]).
 
 -define(UNAUTH, 0).
 -define(AUTH, 1).
@@ -13,7 +13,7 @@
 
 -record(state,
 	{
-		socket :: port(),
+		socket :: inet:socket(),
 		transport :: atom(),
 		mailbox :: binary(),
 		module :: atom(),
@@ -25,10 +25,14 @@
 start_link(Socket, Transport, Options) ->
 	gen_server:start_link(?MODULE, [Socket, Transport, Options], []).
 
+start(Socket, Transport, Options) ->
+	gen_server:start(?MODULE, [Socket, Transport, Options], []).
+
 init([Socket, Transport, [Module | Options]]) ->
 	{ok, Peername} = Transport:peername(Socket),
 	case Module:init(Peername, proplists:get_value(moduleoptions, Options, [])) of
 		{ok, State} ->
+			%% TODO let the callback return the banner
 			reply(Transport, Socket, "* OK server ready\r\n"),
 			Transport:setopts(Socket, [{active, once}, {packet, line}]),
 			{ok, #state{socket=Socket, transport=Transport, module=Module, modstate=State, connstate=?UNAUTH}};
@@ -87,29 +91,24 @@ handle_command(Tag, capability,
 			reply(Transport, Socket, ["* CAPABILITY ", string:join(FullCapabilities, " "), "\r\n",
 					Tag, " OK CAPABILITY completed\r\n"]),
 			{noreply, State#state{modstate=NewModState}};
-		{error, Message, NewModState} ->
-			reply(Transport, Socket, [Tag, " BAD ", Message, "\r\n"]),
-			{noreply, State#state{modstate=NewModState}}
+		Reply ->
+			NewState = handle_common_reply(Reply, Tag, "CAPABILITY", State),
+			{noreply, NewState}
 	end;
 handle_command(Tag, noop,
-	#state{socket=Socket,transport=Transport,module=Module,modstate=ModState} = State) ->
-	case Module:handle_NOOP(ModState) of
-		{ok, NewModState} ->
-			reply(Transport, Socket, [Tag, " OK NOOP completed\r\n"]),
-			{noreply, State#state{modstate=NewModState}};
-		{error, Message, NewModState} ->
-			reply(Transport, Socket, [Tag, " BAD ", Message, "\r\n"]),
-			{noreply, State#state{modstate=NewModState}}
-	end;
+	#state{module=Module,modstate=ModState} = State) ->
+	Reply = Module:handle_NOOP(ModState),
+	NewState = handle_common_reply(Reply, Tag, "NOOP", State),
+	{noreply, NewState};
 handle_command(Tag, logout,
 	#state{socket=Socket,transport=Transport,module=Module,modstate=ModState} = State) ->
 	case Module:handle_LOGOUT(ModState) of
 		{ok, QuitMessage, NewModState} ->
 			reply(Transport, Socket, ["* BYE ", QuitMessage, "\r\n", Tag, " OK LOGOUT completed\r\n"]),
 			{stop, normal, State#state{modstate=NewModState}};
-		{error, Message, NewModState} ->
-			reply(Transport, Socket, [Tag, " BAD ", Message, "\r\n"]),
-			{noreply, State#state{modstate=NewModState}}
+		Reply ->
+			NewState = handle_common_reply(Reply, Tag, "LOGOUT", State),
+			{noreply, NewState}
 	end;
 handle_command(Tag, {login, User, Pass},
 	#state{socket=Socket,transport=Transport,module=Module,modstate=ModState} = State) ->
@@ -117,9 +116,9 @@ handle_command(Tag, {login, User, Pass},
 		{ok, NewModState} ->
 			reply(Transport, Socket, [Tag, " OK LOGIN completed\r\n"]),
 			{noreply, State#state{modstate=NewModState, connstate=?AUTH}};
-		{error, NewModState} ->
-			reply(Transport, Socket, [Tag, " NO LOGIN failed\r\n"]),
-			{noreply, State#state{modstate=NewModState}}
+		Reply ->
+			NewState = handle_common_reply(Reply, Tag, "LOGIN", State),
+			{noreply, NewState}
 	end;
 handle_command(Tag, {list, Reference, Mailbox},
 	#state{socket=Socket,transport=Transport,module=Module,modstate=ModState,connstate=C} = State) when C > ?UNAUTH ->
@@ -139,7 +138,7 @@ handle_command(Tag, {list, Reference, Mailbox},
 			%{noreply, State};
 		[Reference, Mailbox] ->
 			ListResults = Module:handle_LIST(Reference, Mailbox, ModState),
-			reply(Transport, Socket, ListResults ++ [Tag, " OK LIST Completed\r\n"]),
+			reply(Transport, Socket, ListResults ++ [Tag, " OK LIST completed\r\n"]),
 			%reply(Transport, Socket, [Tag, " BAD LIST no such mailbox\r\n"]),
 			{noreply, State}
 	end;
@@ -167,24 +166,39 @@ handle_command(Tag, {lsub, Reference, Mailbox},
 	end;
 handle_command(Tag, {create, _Mailbox},
 	#state{socket=Socket,transport=Transport,module=_Module,modstate=_ModState,connstate=C} = State) when C > ?UNAUTH ->
+	%% TODO
 	reply(Transport, Socket, [Tag, " OK CREATE completed\r\n"]),
 	{noreply, State};
 handle_command(Tag, {subscribe, _Mailbox},
 	#state{socket=Socket,transport=Transport,module=_Module,modstate=_ModState,connstate=C} = State) when C > ?UNAUTH ->
+	%% TODO
 	reply(Transport, Socket, [Tag, " OK SUBSCRIBE completed\r\n"]),
 	{noreply, State};
 handle_command(Tag, {status, Mailbox, Flags},
 	#state{socket=Socket,transport=Transport,module=Module,modstate=ModState,connstate=C} = State) when C > ?UNAUTH ->
 	case Module:handle_STATUS(Mailbox, Flags, ModState) of
-		{ok, Reply, NewModState} ->
-			reply(Transport, Socket, Reply ++ [Tag, " OK STATUS completed\r\n"]),
+		{ok, {Mailbox2, Count, Recent, Unseen, UIDNext, UIDValidity}, NewModState} ->
+			Reply = lists:map(fun(<<"UIDNEXT">>) ->
+						["UIDNEXT ", integer_to_list(UIDNext)];
+					(<<"RECENT">>) ->
+						["RECENT ", integer_to_list(Recent)];
+					(<<"MESSAGES">>) ->
+						["MESSAGES ", integer_to_list(Count)];
+					(<<"UIDVALIDITY">>) ->
+						["UIDVALIDITY ", integer_to_list(UIDValidity)];
+					(<<"UNSEEN">>) ->
+						["UNSEEN ", integer_to_list(Unseen)]
+				end, Flags),
+			Msg = ["* STATUS ", Mailbox2, " (", string:join(Reply, " "), ")\r\n"],
+			reply(Transport, Socket, Msg ++ [Tag, " OK STATUS completed\r\n"]),
 			{noreply, State#state{modstate=NewModState}};
-		{error, Message, NewModState} ->
-			reply(Transport, Socket, [Tag, " BAD ", Message, "\r\n"]),
-			{noreply, State#state{modstate=NewModState}}
+		Reply ->
+			NewState = handle_common_reply(Reply, Tag, "STATUS", State),
+			{noreply, NewState}
 	end;
 handle_command(Tag, check,
 	#state{socket=Socket,transport=Transport,module=_Module,modstate=_ModState,connstate=?SELECTED} = State) ->
+	%% TODO
 	reply(Transport, Socket, [Tag, " OK CHECK completed\r\n"]),
 	{noreply, State};
 handle_command(Tag, {select, Mailbox},
@@ -214,12 +228,14 @@ handle_command(Tag, {select, Mailbox},
 handle_command(Tag, {fetch, Sequence, Spec},
 	#state{socket=Socket,transport=Transport,module=Module,modstate=ModState,connstate=?SELECTED} = State) ->
 	%io:format("fetch ~p ~p~n", [Sequence, Spec]),
-	F = fun(Msg) -> reply(Transport, Socket, Msg) end,
-	Module:handle_FETCH(Sequence, Spec, false, F, ModState),
+	F = fun({fetch_response, Seq, Attributes}) ->
+			Msg = ["* ", integer_to_list(Seq), " FETCH ", encode_fetch_response(Attributes, [])],
+			reply(Transport, Socket, Msg)
+	end,
+	Reply = Module:handle_FETCH(Sequence, Spec, false, F, ModState),
 	%io:format("Fetch results ~p~n", [list_to_binary(FetchResults)]),
-	reply(Transport, Socket, [Tag, " OK FETCH completed\r\n"]),
-	%halt(),
-	{noreply, State};
+	NewState = handle_common_reply(Reply, Tag, "FETCH", State),
+	{noreply, NewState};
 handle_command(Tag, {uid, {fetch, Sequence, Spec}},
 	#state{socket=Socket,transport=Transport,module=Module,modstate=ModState,connstate=?SELECTED} = State) ->
 	%io:format("fetch ~p ~p~n", [Sequence, Spec]),
@@ -252,4 +268,33 @@ handle_command(Tag, _Cmd,
 	reply(Transport, Socket, [Tag, " BAD Command not allowed\r\n"]),
 	{noreply, State}.
 
+handle_common_reply({ok, ModState}, Tag, Command, #state{socket=Socket, transport=Transport} = State) ->
+	reply(Transport, Socket, [Tag, " OK ", Command, " completed\r\n"]),
+	State#state{modstate=ModState};
+handle_common_reply({error, ModState}, Tag, Command, #state{socket=Socket, transport=Transport} = State) ->
+	reply(Transport, Socket, [Tag, " BAD ", Command, " failed\r\n"]),
+	State#state{modstate=ModState};
+handle_common_reply({error, Message, ModState}, Tag, _Command, #state{socket=Socket, transport=Transport} = State) ->
+	reply(Transport, Socket, [Tag, " BAD ", Message, "\r\n"]),
+	State#state{modstate=ModState};
+handle_common_reply({denied, ModState}, Tag, Command, #state{socket=Socket, transport=Transport} = State) ->
+	reply(Transport, Socket, [Tag, " NO ", Command, " denied\r\n"]),
+	State#state{modstate=ModState};
+handle_common_reply({denied, Message, ModState}, Tag, _Command, #state{socket=Socket, transport=Transport} = State) ->
+	reply(Transport, Socket, [Tag, "NO ", Message, "\r\n"]),
+	State#state{modstate=ModState}.
+
+encode_fetch_response([], Acc) ->
+	["(", string:join(lists:reverse(Acc), " "), ")"];
+encode_fetch_response([{Key, Value}|T], Acc) ->
+	encode_fetch_response(T, [[Key, 32, encode_value(Value)] | Acc]);
+encode_fetch_response([error|T], Acc) ->
+	encode_fetch_response(T, Acc).
+
+encode_value(Val) when is_list(Val) ->
+	["(", string:join(Val, " "), ")"];
+encode_value(Val) when is_integer(Val) ->
+	integer_to_list(Val);
+encode_value(Val) ->
+	Val.
 

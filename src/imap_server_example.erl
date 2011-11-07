@@ -5,6 +5,7 @@
 -include_lib("kernel/include/file.hrl").
 
 -record(state, {
+		rootdir :: string(),
 		options,
 		user,
 		folder
@@ -12,7 +13,8 @@
 
 init(Peername, Options) ->
 	io:format("client connection from ~p~n", [Peername]),
-	{ok, #state{options=Options}}.
+	RootDir = proplists:get_value(rootdir, Options, "maildir"),
+	{ok, #state{options=Options, rootdir=RootDir}}.
 
 handle_CAPABILITY(Capabilities, State) ->
 	%% Add or remove from the capabilities list here
@@ -24,16 +26,17 @@ handle_NOOP(State) ->
 handle_LOGOUT(State) ->
 	{ok, "Have a super day!", State}.
 
-handle_LOGIN(User, _Pass, State) ->
-	case filelib:is_dir(list_to_binary(["maildir/", User])) of
+handle_LOGIN(User, _Pass, #state{rootdir=RootDir} = State) ->
+	case filelib:is_dir(filename:join(RootDir, User)) of
 		true ->
 			{ok, State#state{user=User}};
 		false ->
+			?debugFmt("~p does not exist~n", [filename:join(RootDir, User)]),
 			{error, State}
 	end.
 
-handle_SELECT(inbox, #state{user=User} = State) ->
- case filelib:wildcard(binary_to_list(list_to_binary(["maildir/", User,"/[Ii][Nn][Bb][Oo][Xx]"]))) of
+handle_SELECT(inbox, #state{rootdir=RootDir, user=User} = State) ->
+ case filelib:wildcard(binary_to_list(list_to_binary([RootDir, "/", User,"/[Ii][Nn][Bb][Oo][Xx]"]))) of
 	 [] ->
 		 {error, "No INBOX for this user", State#state{folder=undefined}};
 	 [Inbox|_] ->
@@ -41,8 +44,8 @@ handle_SELECT(inbox, #state{user=User} = State) ->
 			%io:format("Folder is ~p", [Folder]),
 		 {ok, mailbox_details(Folder, State), State#state{folder=Folder}}
  end;
-handle_SELECT(Folder, #state{user=User} = State) ->
-	FolderDir = list_to_binary(["maildir/", User, "/", Folder]),
+handle_SELECT(Folder, #state{rootdir=RootDir, user=User} = State) ->
+	FolderDir = filename:join([RootDir, User, Folder]),
 	%io:format("Folder ~p~n", [FolderDir]),
 	case filelib:is_dir(FolderDir) of
 		true ->
@@ -51,8 +54,8 @@ handle_SELECT(Folder, #state{user=User} = State) ->
 		 {error, "Folder does not exist", State#state{folder=undefined}}
  end.
 
-mailbox_details(Mailbox, State) ->
-	FolderDir = list_to_binary(["maildir/", State#state.user, "/", safe_mailbox(Mailbox, State)]),
+mailbox_details(Mailbox, #state{rootdir=RootDir} = State) ->
+	FolderDir = filename:join([RootDir, State#state.user, safe_mailbox(Mailbox, State)]),
 	{ok, Contents} = file:list_dir(FolderDir),
 	Files = [filename:join(FolderDir, X) || X <- Contents, filelib:is_regular(filename:join(FolderDir, X))],
 	UidFirst = 32001,
@@ -69,7 +72,7 @@ mail_details(Seq, Attributes, _, Files, Cb, _State) when Seq > 0->
 	%io:format("contents ~p~n", [Files]),
 	try lists:nth(Seq, Files) of
 		File ->
-			Result = ["* ", integer_to_list(Seq), " FETCH ",  encode_fetch_response(get_attribute(File, Seq+32000, undefined, undefined, Attributes, []), []), "\r\n"],
+			Result = {fetch_response, Seq, get_attribute(File, Seq+32000, undefined, undefined, Attributes, [])},
 			Cb(Result)
 	catch _:_ ->
 		ok
@@ -77,8 +80,8 @@ mail_details(Seq, Attributes, _, Files, Cb, _State) when Seq > 0->
 mail_details(_Seq, _Attributes, _, _Files, _Cb, _State) ->
 	ok.
 
-safe_mailbox(inbox, State) ->
-	case filelib:wildcard(binary_to_list(list_to_binary(["maildir/", State#state.user,"/[Ii][Nn][Bb][Oo][Xx]"]))) of
+safe_mailbox(inbox, #state{rootdir=RootDir} = State) ->
+	case filelib:wildcard(binary_to_list(list_to_binary([RootDir, "/", State#state.user,"/[Ii][Nn][Bb][Oo][Xx]"]))) of
 	 [] ->
 		 "inbox";
 	 [Inbox|_] ->
@@ -219,27 +222,15 @@ get_headers([Header|T], {_, _, Headers, _, _} = Message, Acc) ->
 			get_headers(T, Message, [[Header, ": ", Value, "\r\n"] | Acc])
 	end.
 
-encode_fetch_response([], Acc) ->
-	["(", string:join(lists:reverse(Acc), " "), ")"];
-encode_fetch_response([{Key, Value}|T], Acc) ->
-	encode_fetch_response(T, [[Key, 32, encode_value(Value)] | Acc]);
-encode_fetch_response([error|T], Acc) ->
-	encode_fetch_response(T, Acc).
 
-encode_value(Val) when is_list(Val) ->
-	["(", string:join(Val, " "), ")"];
-encode_value(Val) when is_integer(Val) ->
-	integer_to_list(Val);
-encode_value(Val) ->
-	Val.
-
-handle_FETCH(Seq, Attributes, UID, Callback, State) ->
-	FolderDir = list_to_binary(["maildir/", State#state.user, "/", safe_mailbox(State#state.folder, State)]),
+handle_FETCH(Seq, Attributes, UID, Callback, #state{rootdir=RootDir} = State) ->
+	FolderDir = filename:join([RootDir, State#state.user, safe_mailbox(State#state.folder, State)]),
 	{ok, Contents} = file:list_dir(FolderDir),
 	%% haskish natural sort
 	SortedContents = lists:sort(fun(A, B) -> (catch list_to_float(A++"0")) < (catch list_to_float(B++"0")) end, Contents),
 	Files = [filename:join(FolderDir, X) || X <- SortedContents, filelib:is_regular(filename:join(FolderDir, X))],
-	do_fetch(Seq, Attributes, UID, Files, Callback, State, []).
+	do_fetch(Seq, Attributes, UID, Files, Callback, State, []),
+	{ok, State}.
 
 
 do_fetch([], _, _UID, _Contents, _Cb, _State, Acc) ->
@@ -268,15 +259,15 @@ do_fetch([{Start, End}|T], Attributes, UID, Contents, Cb, State, Acc) ->
 do_fetch([H|T], Attributes, UID, Contents, Cb, State, Acc) ->
 	do_fetch(T, Attributes, UID, Contents, Cb, State, [mail_details(H, Attributes, UID, Contents, Cb, State) | Acc]).
 
-handle_LIST(_, M, State) when M == <<"*">>; M == <<"%">> ->
-	FolderDir = list_to_binary(["maildir/", State#state.user]),
+handle_LIST(_, M, #state{rootdir=RootDir} = State) when M == <<"*">>; M == <<"%">> ->
+	FolderDir = filename:join([RootDir, State#state.user]),
 	{ok, Contents} = file:list_dir(FolderDir),
 	Directories = [filename:join(FolderDir, X) || X <- Contents, filelib:is_dir(filename:join(FolderDir, X))],
 	[["* LIST () \"/\" ", binstr:substr(Dir, byte_size(FolderDir) + 2), "\r\n"] || Dir <- Directories];
-handle_LIST(_, M, #state{user=User}) ->
+handle_LIST(_, M, #state{user=User, rootdir=RootDir}) ->
 	case binstr:to_lower(M) of
 		<<"inbox">> ->
-			case filelib:wildcard(binary_to_list(list_to_binary(["maildir/", User,"/[Ii][Nn][Bb][Oo][Xx]"]))) of
+			case filelib:wildcard(binary_to_list(list_to_binary([RootDir, "/", User,"/[Ii][Nn][Bb][Oo][Xx]"]))) of
 				[] ->
 					[];
 				[Inbox|_] ->
@@ -284,7 +275,7 @@ handle_LIST(_, M, #state{user=User}) ->
 					["* LIST () \"/\" ", Folder, "\r\n"]
 			end;
 		Folder ->
-			FolderDir = list_to_binary(["maildir/", User, "/", Folder]),
+			FolderDir = filename:join([RootDir, User, Folder]),
 			case filelib:is_dir(FolderDir) of
 				true ->
 					["* LIST () \"/\" ", Folder, "\r\n"];
@@ -293,8 +284,8 @@ handle_LIST(_, M, #state{user=User}) ->
 			end
 	end.
 
-handle_LSUB(_, M, State) when M == <<"*">>; M == <<"%">> ->
-	FolderDir = list_to_binary(["maildir/", State#state.user]),
+handle_LSUB(_, M, #state{rootdir=RootDir} = State) when M == <<"*">>; M == <<"%">> ->
+	FolderDir = filename:join([RootDir, State#state.user]),
 	{ok, Contents} = file:list_dir(FolderDir),
 	Directories = [filename:join(FolderDir, X) || X <- Contents, filelib:is_dir(filename:join(FolderDir, X))],
 	[["* LSUB () \"/\" ", binstr:substr(Dir, byte_size(FolderDir) + 2), "\r\n"] || Dir <- Directories].
@@ -303,25 +294,13 @@ handle_LSUB(_, M, State) when M == <<"*">>; M == <<"%">> ->
 handle_CLOSE(State) ->
 	{ok, State#state{folder=undefined}}.
 
-handle_STATUS(Mailbox, Flags, #state{user=User} = State) ->
-	FolderDir = list_to_binary(["maildir/", User, "/", safe_mailbox(Mailbox, State)]),
+handle_STATUS(Mailbox, _Flags, #state{user=User, rootdir=RootDir} = State) ->
+	FolderDir = filename:join([RootDir, User, safe_mailbox(Mailbox, State)]),
 	%io:format("Folder ~p~n", [FolderDir]),
 	case filelib:is_dir(FolderDir) of
 		true ->
-			{Count, Recent, Unseen, _Flags, _PermanentFlags, {_, UIDNext}, UIDValidity, _RW} = mailbox_details(Mailbox, State),
-			Reply = lists:map(fun(<<"UIDNEXT">>) ->
-						["UIDNEXT ", integer_to_list(UIDNext)];
-					(<<"RECENT">>) ->
-						["RECENT ", integer_to_list(Recent)];
-					(<<"MESSAGES">>) ->
-						["MESSAGES ", integer_to_list(Count)];
-					(<<"UIDVALIDITY">>) ->
-						["UIDVALIDITY ", integer_to_list(UIDValidity)];
-					(<<"UNSEEN">>) ->
-						["UNSEEN ", integer_to_list(Unseen)]
-				end, Flags),
-
-			{ok, ["* STATUS ", safe_mailbox(Mailbox, State), " (", string:join(Reply, " "), ")\r\n"], State};
+			{Count, Recent, Unseen, _Flags2, _PermanentFlags, {_, UIDNext}, UIDValidity, _RW} = mailbox_details(Mailbox, State),
+			{ok, {safe_mailbox(Mailbox, State), Count, Recent, Unseen, UIDNext, UIDValidity}, State};
 		_ ->
 		 {error, "Folder does not exist", State}
  end.
