@@ -51,9 +51,12 @@ handle_info({_SocketType, Socket, Packet},
 	#state{socket = Socket, transport=Transport, connstate=C} = State) ->
 	io:format("C: [~p] ~s", [C, Packet]),
 	Result = case imap_parser:parse(Packet) of
-		{fail, _} ->
+		{fail, _X} ->
 			io:format("Failed to parse ~p~n", [Packet]),
 			{stop, normal, State};
+		{_Tag, {incomplete, Command, {literal, RecvLen}}} ->
+			{Tag, Command2} = receive_literals(Transport, Socket, Packet, Command, RecvLen, []),
+			handle_command(Tag, Command2, State);
 		{Tag, {invalid, _Command}} ->
 			io:format("Failed to parse ~p~n", [Packet]),
 			reply(Transport, Socket, [Tag, " BAD Command not recognized or bad arguments\r\n"]),
@@ -229,7 +232,7 @@ handle_command(Tag, {fetch, Sequence, Spec},
 	#state{socket=Socket,transport=Transport,module=Module,modstate=ModState,connstate=?SELECTED} = State) ->
 	%io:format("fetch ~p ~p~n", [Sequence, Spec]),
 	F = fun({fetch_response, Seq, Attributes}) ->
-			Msg = ["* ", integer_to_list(Seq), " FETCH ", encode_fetch_response(Attributes, [])],
+			Msg = ["* ", integer_to_list(Seq), " FETCH ", encode_fetch_response(Attributes, []), "\r\n"],
 			reply(Transport, Socket, Msg)
 	end,
 	Reply = Module:handle_FETCH(Sequence, Spec, false, F, ModState),
@@ -239,12 +242,13 @@ handle_command(Tag, {fetch, Sequence, Spec},
 handle_command(Tag, {uid, {fetch, Sequence, Spec}},
 	#state{socket=Socket,transport=Transport,module=Module,modstate=ModState,connstate=?SELECTED} = State) ->
 	%io:format("fetch ~p ~p~n", [Sequence, Spec]),
-	F = fun(Msg) -> reply(Transport, Socket, Msg) end,
-	Module:handle_FETCH(Sequence, Spec, true, F, ModState),
-	%io:format("Fetch results ~p~n", [list_to_binary(FetchResults)]),
-	reply(Transport, Socket, [Tag, " OK FETCH completed\r\n"]),
-	%halt(),
-	{noreply, State};
+	F = fun({fetch_response, Seq, Attributes}) ->
+			Msg = ["* ", integer_to_list(Seq), " FETCH ", encode_fetch_response(Attributes, []), "\r\n"],
+			reply(Transport, Socket, Msg)
+	end,
+	Reply = Module:handle_FETCH(Sequence, Spec, true, F, ModState),
+	NewState = handle_common_reply(Reply, Tag, "UID FETCH", State),
+	{noreply, NewState};
 handle_command(Tag, {uid, {store, _Sequence, _Flags}},
 	#state{socket=Socket,transport=Transport,module=_Module,modstate=_ModState,connstate=?SELECTED} = State) ->
 	%io:format("fetch ~p ~p~n", [Sequence, Spec]),
@@ -297,4 +301,61 @@ encode_value(Val) when is_integer(Val) ->
 	integer_to_list(Val);
 encode_value(Val) ->
 	Val.
+
+receive_literals(Transport, Socket, Packet, _Command, RecvLen, Literals) ->
+	reply(Transport, Socket, "+ Ready\r\n"),
+	%{ok, NextPacket} = Transport:recv(Socket, RecvLen, 1000),
+	Transport:setopts(Socket, [{active, once}]),
+	receive
+		{_SocketType, Socket, NextPacket} ->
+			ok
+	end,
+	Literal = binary:part(NextPacket, 0, RecvLen),
+	Remainder = binary:part(NextPacket, RecvLen, byte_size(NextPacket) - RecvLen), 
+	OldPart = binary:part(Packet, 0, byte_size(Packet) - 2),
+	NewPacket = <<OldPart/binary, Remainder/binary>>,
+	NewLiterals = Literals ++ [Literal],
+	case imap_parser:parse(NewPacket) of
+		{_Tag, {incomplete, Command2, {literal, RecvLen2}}} ->
+			receive_literals(Transport, Socket, NewPacket, Command2, RecvLen2, NewLiterals);
+		{Tag, Command2} ->
+			try inline_literals(Command2, NewLiterals) of
+				{FixedCommand, _} ->
+					{Tag, FixedCommand}
+			catch
+				throw:{need_more_literals, Len} ->
+					reply(Transport, Socket, "+ Ready\r\n"),
+					Transport:setopts(Socket, [{active, once}]),
+					receive
+						{_SocketType2, Socket, NextPacket2} ->
+							ok
+					end,
+					Literal2 = binary:part(NextPacket2, 0, Len),
+					{FixedCommand, _} = inline_literals(Command2, NewLiterals ++ [Literal2]),
+					{Tag, FixedCommand}
+			end
+	end.
+
+inline_literals({literal, Len}, []) ->
+	throw({need_more_literals, Len});
+inline_literals(R, []) ->
+	{R, []};
+inline_literals({literal, _}, [L|Tail]) ->
+	{L, Tail};
+inline_literals(X, Literals) when is_tuple(X) ->
+	{Res, Literals2} = inline_literals(tuple_to_list(X), Literals),
+	{list_to_tuple(Res), Literals2};
+inline_literals(X, Literals) when is_list(X) ->
+	{Res, Literals2} = lists:foldl(fun({literal, _}, {Acc, [L|Tail]}) ->
+				{[L|Acc], Tail};
+			({literal, Len}, {_, []}) ->
+				throw({need_more_literals, Len});
+			(E, {Acc, Lits}) ->
+				{Res, Tail} = inline_literals(E, Lits),
+				{[Res|Acc], Tail}
+		end, {[], Literals}, X),
+	{lists:reverse(Res), Literals2};
+inline_literals(X, Literals) ->
+	{X, Literals}.
+
 

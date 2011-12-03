@@ -1,5 +1,5 @@
 
-command <- tag SP (command_any / command_nonauth / command_auth / command_select / command_invalid) CRLF`
+command <- tag SP (command_any / command_nonauth / command_auth / command_select / command_incomplete / command_invalid) CRLF`
 [Tag, _, Command, _] = Node,
 {Tag, Command}`;
 
@@ -91,7 +91,7 @@ list_char <- (atom_char / list_wildcards / resp_specials);
 
 literal <- "{" number "}"`
 [_, Number, _] = Node,
-Number`;
+{literal, Number}`;
 
 %% TODO we can convert this into gregorian seconds or something if we need to
 date_time <- '"' date_day_fixed "-" date_month "-" date_year SP time SP zone '"'`
@@ -198,6 +198,10 @@ case Node of
 		{search, <<"us-ascii">>, despace(Keys)}
 end`;
 
+command_incomplete <- (astring SP)+ literal`
+[Command, LiteralLength] = Node,
+{incomplete, list_to_binary(Command), LiteralLength}`;
+
 command_invalid <- [^\r\n]+`
 {invalid, list_to_binary(Node)}`;
 
@@ -280,7 +284,9 @@ list_to_integer(binary_to_list(iolist_to_binary(Node)))`;
 nz_number <- [1-9]+ [0-9]*`
 list_to_integer(binary_to_list(iolist_to_binary(Node)))`;
 
-string <- '"' chars:(!'"' ("\\\\" / '\\"' / .))* '"' `iolist_to_binary(proplists:get_value(chars, Node))`;
+string <- ( quoted / literal );
+
+quoted <- '"' chars:(!'"' ("\\\\" / '\\"' / .))* '"' `iolist_to_binary(proplists:get_value(chars, Node))`;
 
 atom <- atom_char+`
 list_to_binary(Node)`;

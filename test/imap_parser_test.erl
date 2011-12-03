@@ -27,10 +27,10 @@ starttls_test() ->
 	?assertMatch({fail, _}, imap_parser:parse("Tag STARTTLS GSSAPI\r\n")).
 
 append_test() ->
-	?assertEqual({<<"Tag">>, {append, inbox, undefined, undefined, 4096}}, imap_parser:parse("Tag APPEND InBoX {4096}\r\n")),
-	?assertEqual({<<"Tag">>, {append, inbox, [<<"\\Draft">>], undefined, 4096}}, imap_parser:parse("Tag APPEND InBoX (\\Draft) {4096}\r\n")),
-	?assertEqual({<<"Tag">>, {append, inbox, undefined, <<"10-May-2011 11:10:00 +0500">>, 4096}}, imap_parser:parse("Tag APPEND InBoX \"10-May-2011 11:10:00 +0500\" {4096}\r\n")),
-	?assertEqual({<<"Tag">>, {append, inbox, undefined, <<"10-May-2011 11:10:00 +0500">>, 4096}}, imap_parser:parse("Tag APPEND \"INBOX\" \"10-May-2011 11:10:00 +0500\" {4096}\r\n")).
+	?assertEqual({<<"Tag">>, {append, inbox, undefined, undefined, {literal, 4096}}}, imap_parser:parse("Tag APPEND InBoX {4096}\r\n")),
+	?assertEqual({<<"Tag">>, {append, inbox, [<<"\\Draft">>], undefined, {literal, 4096}}}, imap_parser:parse("Tag APPEND InBoX (\\Draft) {4096}\r\n")),
+	?assertEqual({<<"Tag">>, {append, inbox, undefined, <<"10-May-2011 11:10:00 +0500">>, {literal, 4096}}}, imap_parser:parse("Tag APPEND InBoX \"10-May-2011 11:10:00 +0500\" {4096}\r\n")),
+	?assertEqual({<<"Tag">>, {append, inbox, undefined, <<"10-May-2011 11:10:00 +0500">>, {literal, 4096}}}, imap_parser:parse("Tag APPEND \"INBOX\" \"10-May-2011 11:10:00 +0500\" {4096}\r\n")).
 
 create_test() ->
 	?assertEqual({<<"Tag">>, {create, <<"mybox">>}}, imap_parser:parse("Tag CREATE mybox\r\n")).

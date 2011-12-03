@@ -3,6 +3,7 @@
 -export([init/2, handle_CAPABILITY/2, handle_NOOP/1, handle_LOGOUT/1, handle_LOGIN/3, handle_SELECT/2, handle_FETCH/5, handle_LIST/3, handle_CLOSE/1, handle_STATUS/3, handle_LSUB/3]).
 
 -include_lib("kernel/include/file.hrl").
+-include_lib("eunit/include/eunit.hrl").
 
 -record(state, {
 		rootdir :: string(),
@@ -31,7 +32,6 @@ handle_LOGIN(User, _Pass, #state{rootdir=RootDir} = State) ->
 		true ->
 			{ok, State#state{user=User}};
 		false ->
-			?debugFmt("~p does not exist~n", [filename:join(RootDir, User)]),
 			{error, State}
 	end.
 
@@ -67,6 +67,8 @@ mailbox_details(Mailbox, #state{rootdir=RootDir} = State) ->
 	{length(Files), 0, length(Files) + 1, ["\\Answered", "\\Flagged", "\\Deleted", "\\Seen", "\\Draft"], ["\\Seen"], {UidFirst, UidNext+1}, UIDValidity, read_only}.
 
 mail_details(Uid, Attributes, true, Files, Cb, State) -> %% UID fetch
+	?debugFmt("UID is ~p~n", [Uid]),
+	?debugFmt("ID is ~p~n", [Uid-32000]),
 	mail_details(Uid-32000, Attributes, false, Files, Cb, State);
 mail_details(Seq, Attributes, _, Files, Cb, _State) when Seq > 0->
 	%io:format("contents ~p~n", [Files]),
@@ -75,6 +77,7 @@ mail_details(Seq, Attributes, _, Files, Cb, _State) when Seq > 0->
 			Result = {fetch_response, Seq, get_attribute(File, Seq+32000, undefined, undefined, Attributes, [])},
 			Cb(Result)
 	catch _:_ ->
+		?debugFmt("can't find file~n", []),
 		ok
 	end;
 mail_details(_Seq, _Attributes, _, _Files, _Cb, _State) ->
@@ -170,6 +173,8 @@ get_attribute(File, UID, FInfo, Message0, [<<"ENVELOPE">>|T], Acc) ->
 	{_, _, Headers, _, _} = Message = get_message(File, Message0),
 	%% date, subject, from, sender, reply-to, to, cc, bcc, in-reply-to, and message-id
 	%% sender & reply-to should fall back to From
+	%% TODO From, To, CC, & BCC headers should be NIL if missing, the others should
+	%% be the empty string if missing.
 	Env = ["(", get_header(<<"Date">>, Headers), " ", get_header(<<"Subject">>, Headers), " ",
 		get_address_struct(<<"From">>, Headers), " ", get_address_struct(<<"Sender">>, <<"From">>, Headers), " ",
 		get_address_struct(<<"Reply-To">>, <<"From">>, Headers), " ", get_address_struct(<<"To">>, Headers), " ",
@@ -182,8 +187,10 @@ get_attribute(File, UID, FInfo, Message, [Att|T], Acc) ->
 
 make_bodystructure({<<"multipart">>, SubType, _Header, _Params, BodyParts}) ->
 	["(", [make_bodystructure(Part) || Part <- BodyParts], " \"", SubType, "\")"];
-make_bodystructure({Type, SubType, _Header, _Params, Body}) ->
-	["(\"", Type, "\" \"", SubType, "\" (\"CHARSET\" \"us-ascii\") NIL NIL \"7BIT\" ", integer_to_list(byte_size(Body)), " ", integer_to_list(length(binstr:split(Body, <<"\n">>))), ")"].
+make_bodystructure({Type, SubType, Header, Params, Body}) ->
+	TransferEncoding = mimemail:get_header_value(<<"Content-Transfer-Encoding">>, Header, <<"7bit">>),
+	ContentParams = ["(", [["\"", Key, "\" \"", Value, "\""] || {Key, Value} <- proplists:get_value(<<"content-type-params">>, Params, [])], ")"],
+	["(\"", Type, "\" \"", SubType, "\" ",ContentParams," NIL NIL \"",TransferEncoding, "\" ", integer_to_list(byte_size(Body)), " ", integer_to_list(length(binstr:split(Body, <<"\n">>))), ")"].
 
 get_header(Header, Headers) ->
 	%% either NIL or a quoted string
@@ -213,7 +220,7 @@ get_address_struct(Header, Headers) ->
 	end.
 
 get_headers([], _, Acc) ->
-	list_to_binary([lists:reverse(Acc), "\r\n"]);
+	list_to_binary(lists:reverse(Acc));
 get_headers([Header|T], {_, _, Headers, _, _} = Message, Acc) ->
 	case mimemail:get_header_value(Header, Headers) of
 		undefined ->

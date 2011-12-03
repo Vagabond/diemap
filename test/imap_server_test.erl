@@ -119,7 +119,86 @@ server_test_() ->
 								?assertEqual("2 OK [READ-ONLY] SELECT completed\r\n",  get_msg(CSock))
 						end
 					}
+			end,
+			fun({CSock, _Pid}) ->
+					{"FETCH should work",
+						fun() ->
+								?assertMatch("* OK "++_Stuff,  get_msg(CSock)),
+								gen_tcp:send(CSock, "1 LOGIN lay-k password\r\n"),
+								?assertEqual("1 OK LOGIN completed\r\n",  get_msg(CSock)),
+								gen_tcp:send(CSock, "2 SELECT inbox\r\n"),
+								?assertEqual("* 9 EXISTS\r\n",  get_msg(CSock)),
+								?assertEqual("* 0 RECENT\r\n",  get_msg(CSock)),
+								?assertEqual("* OK [UNSEEN 10]\r\n",  get_msg(CSock)),
+								?assertMatch("* OK [UIDNEXT"++_,  get_msg(CSock)),
+								?assertMatch("* OK [UIDVALIDITY"++_,  get_msg(CSock)),
+								?assertMatch("* OK [PERMANENTFLAGS"++_,  get_msg(CSock)),
+								?assertMatch("* FLAGS"++_,  get_msg(CSock)),
+								?assertEqual("2 OK [READ-ONLY] SELECT completed\r\n",  get_msg(CSock)),
+								gen_tcp:send(CSock, "3 FETCH 1 (RFC822.SIZE)\r\n"),
+								[First|_] = lists:sort(element(2, file:list_dir("../testdata/lay-k/inbox"))),
+								{ok, Bin} = file:read_file(filename:join(["..", "testdata", "lay-k", "inbox", First])),
+								{Type, SubType, Headers, Params, _Body} = _Email = mimemail:decode(Bin),
+								?assertEqual("* 1 FETCH (RFC822.SIZE "++integer_to_list(byte_size(Bin))++")\r\n",  get_msg(CSock)),
+								?assertEqual("3 OK FETCH completed\r\n",  get_msg(CSock)),
+								gen_tcp:send(CSock, "4 FETCH 1 (UID)\r\n"),
+								?assertEqual("* 1 FETCH (UID 32001)\r\n",  get_msg(CSock)),
+								?assertEqual("4 OK FETCH completed\r\n",  get_msg(CSock)),
+								Subject = list_to_binary(["SUBJECT: ", mimemail:get_header_value(<<"Subject">>, Headers), "\r\n"]),
+								gen_tcp:send(CSock, "5 FETCH 1 BODY[HEADER.FIELDS (SUBJECT)]\r\n"),
+								?assertEqual("* 1 FETCH (BODY[HEADER.FIELDS (SUBJECT)] {"++integer_to_list(byte_size(Subject))++"}\r\n",  get_msg(CSock)),
+								?assertEqual(binary_to_list(Subject), get_msg(CSock)),
+								?assertEqual(")\r\n", get_msg(CSock)),
+								?assertEqual("5 OK FETCH completed\r\n",  get_msg(CSock)),
+								gen_tcp:send(CSock, "6 FETCH 1 BODYSTRUCTURE\r\n"),
+								[_Header, RawBody] = binary:split(Bin, <<"\r\n\r\n">>),
+								Lines = length(binary:split(RawBody, <<"\n">>, [global, trim])),
+								?debugFmt("params ~p~n", [Params]),
+								?assertEqual("* 1 FETCH (BODYSTRUCTURE (\""++binary_to_list(Type)++"\" \""++binary_to_list(SubType)++"\" (\"charset\" \"us-ascii\") NIL NIL \"7bit\" "++integer_to_list(byte_size(RawBody))++" "++integer_to_list(Lines)++"))\r\n",  get_msg(CSock)),
+								?assertEqual("6 OK FETCH completed\r\n",  get_msg(CSock)),
+								ok
+						end
+					}
+			end,
+			fun({CSock, _Pid}) ->
+					{"UID FETCH should work",
+						fun() ->
+								?assertMatch("* OK "++_Stuff,  get_msg(CSock)),
+								gen_tcp:send(CSock, "1 LOGIN lay-k password\r\n"),
+								?assertEqual("1 OK LOGIN completed\r\n",  get_msg(CSock)),
+								gen_tcp:send(CSock, "2 SELECT inbox\r\n"),
+								?assertEqual("* 9 EXISTS\r\n",  get_msg(CSock)),
+								?assertEqual("* 0 RECENT\r\n",  get_msg(CSock)),
+								?assertEqual("* OK [UNSEEN 10]\r\n",  get_msg(CSock)),
+								?assertMatch("* OK [UIDNEXT"++_,  get_msg(CSock)),
+								?assertMatch("* OK [UIDVALIDITY"++_,  get_msg(CSock)),
+								?assertMatch("* OK [PERMANENTFLAGS"++_,  get_msg(CSock)),
+								?assertMatch("* FLAGS"++_,  get_msg(CSock)),
+								?assertEqual("2 OK [READ-ONLY] SELECT completed\r\n",  get_msg(CSock)),
+								gen_tcp:send(CSock, "3 UID FETCH 32001 (RFC822.SIZE)\r\n"),
+								[First|_] = lists:sort(element(2, file:list_dir("../testdata/lay-k/inbox"))),
+								{ok, Bin} = file:read_file(filename:join(["..", "testdata", "lay-k", "inbox", First])),
+								?assertEqual("* 1 FETCH (UID 32001 RFC822.SIZE "++integer_to_list(byte_size(Bin))++")\r\n",  get_msg(CSock)),
+								?assertEqual("3 OK UID FETCH completed\r\n",  get_msg(CSock)),
+								ok
+						end
+					}
+			end,
+			fun({CSock, _Pid}) ->
+					{"LOGIN using literals",
+						fun() ->
+								?assertMatch("* OK "++_Stuff,  get_msg(CSock)),
+								gen_tcp:send(CSock, "1 LOGIN {9}\r\n"),
+								?assertEqual("+ Ready\r\n",  get_msg(CSock)),
+								gen_tcp:send(CSock, "Some Dude {9}\r\n"),
+								?assertEqual("+ Ready\r\n",  get_msg(CSock)),
+								gen_tcp:send(CSock, "Pass Word\r\n"),
+								?assertEqual("1 BAD LOGIN failed\r\n",  get_msg(CSock)),
+								ok
+						end
+					}
 			end
+
 		]
 	}.
 
